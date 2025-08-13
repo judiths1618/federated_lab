@@ -328,69 +328,212 @@ class ContractSim:
             k: float(v) for k, v in rec.items() if isinstance(v, (int, float))
         }
 
+    # def settle_round(self, round_idx: int) -> Dict[int, float]:
+    #     r = int(round_idx)
+
+    #     # 不要清空已有奖励：读取或创建当轮奖励表
+    #     rewards_r = self.rewards.setdefault(r, {})
+    #     self.mal_detected[r] = {}
+    #     self.penalties[r] = {}
+
+    #     contribs_r = self.contribs.get(r, {})
+    #     if not contribs_r:
+    #         return dict(rewards_r)  # nothing to do
+
+    #     # aggregates
+    #     stakes_list = [float(self.nodes[n]["stake"]) for n in self.nodes] or [0.0]
+    #     avg_stake = sum(stakes_list) / max(1, len(stakes_list))
+    #     reps_list = [float(self.nodes[n]["reputation"]) for n in self.nodes] or [0.0]
+    #     avg_rep = sum(reps_list) / max(1, len(reps_list))
+
+    #     for nid, info in self.nodes.items():
+    #         info["participation"] = int(info.get("participation", 0)) + 1
+    #         r = int(round_idx)
+    #         rewards_r = self.rewards.setdefault(r, {})
+    #         self.mal_detected[r] = {}
+    #         self.penalties[r] = {}
+
+    #         contribs_r = self.contribs.get(r, {})
+    #         if not contribs_r:
+    #             return dict(rewards_r)
+
+    #         feats_r = self.features.get(r, {})
+
+    #         # 这里**不要**再 append 贡献历史，避免与 Aggregator 重复
+    #         score = float(contribs_r.get(nid, 0.0))
+    #         feat = self.features.get(r, {}).get(nid, {})
+    #         claimed = float(feat.get("claimed_acc", float("nan")))
+    #         evalacc = float(feat.get("eval_acc", float("nan")))
+
+    #         # 使用 Aggregator 写入的阈值；若缺失则回退到 params
+    #         final_tau = float(feat.get("pre_tau", float(getattr(self.params, "mal_eval_diff_thresh", 0.15))))
+    #         mal_min_gap = float(feat.get("pre_min_gap", float(getattr(self.params, "mal_min_gap", 0.05))))
+
+    #         if math.isfinite(claimed) and math.isfinite(evalacc):
+    #             diff = max(0.0, claimed - evalacc)  # 非负差额
+    #             # 可选：相对阈值，claimed 越高允许更大 gap
+    #             a = float(getattr(self.params, "mal_allowed_base", 0.05))
+    #             b = float(getattr(self.params, "mal_allowed_slope", 0.20))
+    #             allowed_rel = a + b * max(0.0, 1.0 - claimed)
+    #             # 终阈值：三者取最大
+    #             tau = max(final_tau, mal_min_gap, allowed_rel)
+    #             suspicious = (diff > tau)
+    #         else:
+    #             # 没有 eval 时，回退到贡献分阈值
+    #             suspicious = (score < float(self.params.detect_score_thresh))
+
+    #         if not (math.isnan(claimed) or math.isnan(evalacc)):
+    #             suspicious = (claimed - evalacc) > float(self.params.mal_eval_diff_thresh)
+    #         else:
+    #             suspicious = (score < float(self.params.detect_score_thresh))
+
+    #         self.mal_detected[r][nid] = int(bool(suspicious))
+
+    #         if suspicious:
+    #             print(f"Node {nid} suspicious: score={score:.4f}, claimed={claimed:.4f}, evalacc={evalacc:.4f}")
+    #             old_stake = float(info["stake"])
+    #             penalty = old_stake * float(self.params.stake_penalty_factor)
+    #             info["stake"] = max(0.0, old_stake - penalty)
+    #             info["reputation"] = max(0.0, float(info["reputation"]) * (1.0 - float(self.params.rep_penalty_factor)))
+    #             self.penalties[r][nid] = float(penalty)
+    #             # 可疑则本轮奖励置 0
+    #             rewards_r[nid] = 0.0
+    #             print(rewards_r[nid])
+    #         else:
+    #             # 正常节点：将 aggregator 侧累计到 rewards_r[nid] 的奖励打入余额，并提升 reputation/stake
+    #             reward = float(rewards_r.get(nid, 0.0))
+    #             info["stake"] = float(info["stake"]) + reward
+    #             # info["reputation"] = float(info["reputation"]) + float(self.params.rep_gain_factor) * max(0.0, score)
+    #             self.update_reputation(nid, max(0.0, score), current_round=r)
+    #             self.penalties[r][nid] = 0.0
+    #             # 入账到余额（只在 settle 时做一次）
+    #             self.balances[nid] = self.balances.get(nid, 0.0) + reward
+    #             print(reward, self.balances[nid],info["stake"], info["reputation"], nid, suspicious)
+    #     return dict(rewards_r)
+
     def settle_round(self, round_idx: int) -> Dict[int, float]:
+        """
+        Finalize incentives for round `round_idx`:
+        - Adaptive malicious detection using claimed/eval accuracy gaps
+        - Warmup (no penalties)
+        - Rewards settlement into balances
+        - Stake and reputation updates (with user-provided robust rep update)
+        Returns the per-node reward map for this round.
+        """
         r = int(round_idx)
 
-        # 不要清空已有奖励：读取或创建当轮奖励表
+        # DO NOT clear rewards: aggregator has already written to self.rewards[r][nid]
         rewards_r = self.rewards.setdefault(r, {})
         self.mal_detected[r] = {}
         self.penalties[r] = {}
 
         contribs_r = self.contribs.get(r, {})
         if not contribs_r:
-            return dict(rewards_r)  # nothing to do
+            # No contributions; nothing to settle
+            return dict(rewards_r)
 
-        # aggregates
-        stakes_list = [float(self.nodes[n]["stake"]) for n in self.nodes] or [0.0]
-        avg_stake = sum(stakes_list) / max(1, len(stakes_list))
-        reps_list = [float(self.nodes[n]["reputation"]) for n in self.nodes] or [0.0]
-        avg_rep = sum(reps_list) / max(1, len(reps_list))
+        feats_r = self.features.get(r, {})
 
+        # --- Build adaptive threshold (IQR) over non-negative diffs: max(0, claimed - eval) ---
+        diffs = []
+        for nid, f in feats_r.items():
+            cl = float(f.get("claimed_acc", float("nan")))
+            ev = float(f.get("eval_acc", float("nan")))
+            if math.isfinite(cl) and math.isfinite(ev):
+                diffs.append(max(0.0, cl - ev))
+
+        default_abs_tau = float(getattr(self.params, "mal_eval_diff_thresh", 0.15))
+        if len(diffs) >= 4:
+            vals = np.asarray(diffs, dtype=float)
+            q1, q3 = np.percentile(vals, [25, 75])
+            iqr = max(1e-8, float(q3 - q1))
+            adaptive_tau = float(q3 + 1.5 * iqr)
+        else:
+            adaptive_tau = float("nan")
+
+        # Allow aggregator to pass a per-round tau via features['pre_tau'] (if present)
+        pre_taus = [float(f.get("pre_tau")) for f in feats_r.values() if "pre_tau" in f]
+        pre_tau = pre_taus[0] if pre_taus else float("nan")
+
+        final_tau = default_abs_tau
+        for candidate in (pre_tau, adaptive_tau):
+            if math.isfinite(candidate):
+                final_tau = max(final_tau, float(candidate))
+
+        mal_min_gap = float(getattr(self.params, "mal_min_gap", 0.05))
+        a = float(getattr(self.params, "mal_allowed_base", 0.05))
+        b = float(getattr(self.params, "mal_allowed_slope", 0.20))
+        warmup = int(getattr(self.params, "warmup_rounds", 1))
+        detect_score_thresh = float(getattr(self.params, "detect_score_thresh", 0.05))
+
+        # --- Per-node settlement ---
         for nid, info in self.nodes.items():
-            info["participation"] = int(info.get("participation", 0)) + 1
-            # 这里**不要**再 append 贡献历史，避免与 Aggregator 重复
+            # Participation count (drives age/delta in update_reputation)
+            if nid in contribs_r:
+                info["participation"] = int(info.get("participation", 0)) + 1
+
             score = float(contribs_r.get(nid, 0.0))
-            feat = self.features.get(r, {}).get(nid, {})
+            feat = feats_r.get(nid, {})
+
             claimed = float(feat.get("claimed_acc", float("nan")))
             evalacc = float(feat.get("eval_acc", float("nan")))
 
-            # 使用 Aggregator 写入的阈值；若缺失则回退到 params
-            final_tau = float(feat.get("pre_tau", float(getattr(self.params, "mal_eval_diff_thresh", 0.15))))
-            mal_min_gap = float(feat.get("pre_min_gap", float(getattr(self.params, "mal_min_gap", 0.05))))
-
-            if math.isfinite(claimed) and math.isfinite(evalacc):
-                diff = max(0.0, claimed - evalacc)  # 非负差额
-                # 可选：相对阈值，claimed 越高允许更大 gap
-                a = float(getattr(self.params, "mal_allowed_base", 0.05))
-                b = float(getattr(self.params, "mal_allowed_slope", 0.20))
+            # Suspicious decision:
+            #  - only non-negative diff matters: diff = max(0, claimed - eval)
+            #  - threshold = max( final_tau (IQR/default/pre_tau), mal_min_gap, a + b*(1-claimed) )
+            if math.isfinite(claimed) and math.isfinite(evalacc)):
+                diff = max(0.0, claimed - evalacc)
                 allowed_rel = a + b * max(0.0, 1.0 - claimed)
                 # 终阈值：三者取最大
                 tau = max(final_tau, mal_min_gap, allowed_rel)
-                suspicious = diff > tau
+                suspicious = (diff > tau)
             else:
                 # 没有 eval 时，回退到贡献分阈值
-                suspicious = score < float(self.params.detect_score_thresh)
+                suspicious = (score < float(self.params.detect_score_thresh))
+
+            if not (math.isnan(claimed) or math.isnan(evalacc)):
+                suspicious = (claimed - evalacc) > float(self.params.mal_eval_diff_thresh)
+            else:
+                suspicious = (score < float(self.params.detect_score_thresh))
 
             self.mal_detected[r][nid] = int(bool(suspicious))
 
-            if suspicious:
-                print(f"Node {nid} suspicious: score={score:.4f}, claimed={claimed:.4f}, evalacc={evalacc:.4f}")
-                old_stake = float(info["stake"])
-                penalty = old_stake * float(self.params.stake_penalty_factor)
-                info["stake"] = max(0.0, old_stake - penalty)
-                info["reputation"] = max(0.0, float(info["reputation"]) * (1.0 - float(self.params.rep_penalty_factor)))
-                self.penalties[r][nid] = float(penalty)
-                # 可疑则本轮奖励置 0
-                rewards_r[nid] = 0.0
-                print(rewards_r[nid])
-            else:
-                # 正常节点：将 aggregator 侧累计到 rewards_r[nid] 的奖励打入余额，并提升 reputation/stake
+            # --- Warmup: mark only, no penalties; still settle rewards & update reputation ---
+            if r < warmup:
                 reward = float(rewards_r.get(nid, 0.0))
+                # stake grows by reward; reward goes to balance once per round
                 info["stake"] = float(info["stake"]) + reward
-                # info["reputation"] = float(info["reputation"]) + float(self.params.rep_gain_factor) * max(0.0, score)
+                self.balances[nid] = self.balances.get(nid, 0.0) + reward
+                # reputation via robust rule
                 self.update_reputation(nid, max(0.0, score), current_round=r)
                 self.penalties[r][nid] = 0.0
-                # 入账到余额（只在 settle 时做一次）
+                continue
+
+            if suspicious:
+                # Penalize stake multiplicatively; zero out reward for this round
+                old_stake = float(info["stake"])
+                stake_pen = old_stake * float(getattr(self.params, "stake_penalty_factor", 0.02))
+                info["stake"] = max(0.0, old_stake - stake_pen)
+                # Reputation multiplicative penalty
+                rep_pen = float(getattr(self.params, "rep_penalty_factor", 0.5))
+                punished_rep = float(info.get("reputation", 0.0)) * (1.0 - rep_pen)
+                info["reputation"] = max(0.0, punished_rep)
+
+                self.penalties[r][nid] = float(stake_pen)
+                rewards_r[nid] = 0.0  # override any aggregator-written reward
+                # No balance credit on malicious nodes
+            else:
+                # Good node: credit reward, grow stake, update reputation using your robust updater
+                reward = float(rewards_r.get(nid, 0.0))
+                info["stake"] = float(info["stake"]) + reward
                 self.balances[nid] = self.balances.get(nid, 0.0) + reward
-                print(reward, self.balances[nid],info["stake"], info["reputation"], nid, suspicious)
+
+                # Reputation update per your formula (uses participation, recent stability, etc.)
+                self.update_reputation(nid, max(0.0, score), current_round=r)
+
+                self.penalties[r][nid] = 0.0
+
+        # (Optional) small committee reputation boost per round:
+        # self.apply_committee_reputation_bonus(r)
+
         return dict(rewards_r)
