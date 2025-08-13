@@ -48,58 +48,6 @@ def _sigmoid_scalar(x: float) -> float:
     except OverflowError:
         return 0.0 if x < 0 else 1.0
 
-def update_reputation(self, node_id: int, contribution: float, *, current_round: int) -> float:
-    """
-    按你给出的“稳健声誉更新系统”更新指定节点的声誉，并返回新声誉。
-    - 动态衰减 delta
-    - 贡献质量 sigmoid
-    - 稳定性（最近 5 轮贡献的 std）
-    - 动态上限（round > cap_round 用较大上限）
-    """
-    nid = int(node_id)
-    if nid not in self.nodes:
-        return 0.0
-
-    info = self.nodes[nid]
-    # 读取节点侧字段
-    rep = float(info.get("reputation", 0.0))
-    history = list(info.get("contrib_history", []))
-    participation = int(info.get("participation", 0))
-
-    # --- 动态衰减 ---
-    # age_factor = 1 - 1/(1 + participation/100)
-    # delta = 0.88 + 0.07 * age_factor
-    age_factor = 1.0 - 1.0 / (1.0 + (participation / 100.0))
-    delta = 0.88 + 0.07 * age_factor  # ∈[0.88, 0.95)
-
-    # --- 贡献质量 ---
-    # 默认使用 contrib_base=0, contrib_thre=10（按你的原文）
-    # 如果你贡献分是 0~1，考虑把 contrib_thre 调成 1.0（或通过 set_incentive_params 注入）
-    contrib_base = float(getattr(self.params, "contrib_base", 0.0))
-    contrib_thre = float(getattr(self.params, "contrib_thre", 1.0))
-    denom = max(1e-8, (contrib_thre - contrib_base))
-    contrib_quality = _sigmoid_scalar((float(contribution) - contrib_base) / denom)
-
-    # --- 稳定性 ---
-    if len(history) >= 5:
-        stability = 1.0 - (float(np.std(history[-5:], dtype=float)) / 5.0)
-    else:
-        stability = 0.8  # 经验默认
-
-    # --- 新声誉 ---
-    X_c = float(self.params.X_c)
-    X_s = float(self.params.X_s)
-    new_rep = (rep * delta) + (contrib_quality * X_c) + (stability * X_s)
-
-    # --- 动态上限 ---
-    cap_round = int(self.params.rep_cap_round)
-    rep_cap = float(self.params.rep_cap_late if current_round > cap_round else self.params.rep_cap_early)
-    new_rep = float(np.clip(new_rep, 0.0, rep_cap))
-
-    # 落地
-    self.nodes[nid]["reputation"] = new_rep
-    return new_rep
-
 # --------------------------- params ---------------------------
 
 @dataclass
@@ -224,7 +172,45 @@ class ContractSim:
             "cooldown": 0.0,
             "contrib_history": [],
             "participation": 0,   # <— 新增：参与轮数统计
-    }
+        }
+
+    def update_reputation(self, node_id: int, contribution: float, *, current_round: int) -> float:
+        """Update a node's reputation using a robust decay and stability model."""
+        nid = int(node_id)
+        if nid not in self.nodes:
+            return 0.0
+
+        info = self.nodes[nid]
+        rep = float(info.get("reputation", 0.0))
+        history = list(info.get("contrib_history", []))
+        participation = int(info.get("participation", 0))
+
+        # dynamic decay factor based on participation count
+        age_factor = 1.0 - 1.0 / (1.0 + (participation / 100.0))
+        delta = 0.88 + 0.07 * age_factor
+
+        # contribution quality via sigmoid normalization
+        contrib_base = float(getattr(self.params, "contrib_base", 0.0))
+        contrib_thre = float(getattr(self.params, "contrib_thre", 1.0))
+        denom = max(1e-8, (contrib_thre - contrib_base))
+        contrib_quality = _sigmoid_scalar((float(contribution) - contrib_base) / denom)
+
+        # stability over recent history
+        if len(history) >= 5:
+            stability = 1.0 - (float(np.std(history[-5:], dtype=float)) / 5.0)
+        else:
+            stability = 0.8
+
+        X_c = float(self.params.X_c)
+        X_s = float(self.params.X_s)
+        new_rep = (rep * delta) + (contrib_quality * X_c) + (stability * X_s)
+
+        cap_round = int(self.params.rep_cap_round)
+        rep_cap = float(self.params.rep_cap_late if current_round > cap_round else self.params.rep_cap_early)
+        new_rep = float(np.clip(new_rep, 0.0, rep_cap))
+
+        self.nodes[nid]["reputation"] = new_rep
+        return new_rep
     # ---------------- committee selection (refined) ----------------
     def set_committee(self, round_idx: int, nodes: List[Any], *, num_strata: int = 3) -> List[int]:
         """
