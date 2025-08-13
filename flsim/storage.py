@@ -380,15 +380,10 @@ class ContractSim:
                 allowed_rel = a + b * max(0.0, 1.0 - claimed)
                 # 终阈值：三者取最大
                 tau = max(final_tau, mal_min_gap, allowed_rel)
-                suspicious = (diff > tau)
+                suspicious = diff > tau
             else:
                 # 没有 eval 时，回退到贡献分阈值
-                suspicious = (score < float(self.params.detect_score_thresh))
-
-            if not (math.isnan(claimed) or math.isnan(evalacc)):
-                suspicious = (claimed - evalacc) > float(self.params.mal_eval_diff_thresh)
-            else:
-                suspicious = (score < float(self.params.detect_score_thresh))
+                suspicious = score < float(self.params.detect_score_thresh)
 
             self.mal_detected[r][nid] = int(bool(suspicious))
 
