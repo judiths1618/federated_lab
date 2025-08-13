@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Dict, Tuple, List, Optional
 import math
+import os
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -91,10 +92,14 @@ class LocalNode:
 
         model_cid = self.ipfs.save(update_obj)
         metrics_cid = self.ipfs.save({"loss": rep_loss, "acc": rep_acc, "samples": self.num_samples})
-        
+
         # Optional: save update *.pt locally for inspection
-        # if self.save_updates:
-        #     fname = os.path.join(self.save_dir, "updates", f"round_{round_idx}_node_{self.cfg.node_id}_{update_type}.pt")
-        #     torch.save(update_obj, fname)
+        if self.save_updates:
+            fname = os.path.join(
+                self.save_dir,
+                "updates",
+                f"round_{round_idx}_node_{self.cfg.node_id}_{update_type}.pt",
+            )
+            torch.save(update_obj, fname)
         self.contract.submit_model(round_idx, self.cfg.node_id, model_cid, metrics_cid, update_type)
         return rep_loss, rep_acc, update_type, model_cid, metrics_cid
