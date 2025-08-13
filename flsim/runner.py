@@ -8,7 +8,7 @@ from .config import Cfg
 from .partition import make_flower_partitions
 from .node import LocalNode, NodeConfig
 from .storage import IPFSSim, ContractSim
-from .aggregator import Aggregator
+from flsim.aggregation.aggregator import Aggregator
 from .eval import evaluate_global
 from .attacks import make_behavior
 
@@ -89,6 +89,7 @@ class FLRunner:
         aggr = Aggregator(
             self.ipfs, self.contract, nodes,
             save_dir=str(self.cfg.paths.run_dir),
+            strategy_name=self.cfg.aggregation.strategy,
 
             # --- 评测提示（可选） ---
             dataset_name=getattr(getattr(self.cfg, "data", None), "name", "mnist"),

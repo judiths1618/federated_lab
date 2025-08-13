@@ -68,6 +68,10 @@ class ModelCfg:
     name: str | None = None
 
 @dataclass
+class AggregationCfg:
+    strategy: str = "fedavg"
+
+@dataclass
 class Cfg:
     data: DataCfg
     model: ModelCfg
@@ -75,6 +79,7 @@ class Cfg:
     reward: RewardCfg
     attack: AttackCfg
     paths: PathsCfg
+    aggregation: AggregationCfg
 
 def build_config(args, run_dir: Path):
     paths = PathsCfg(
@@ -84,7 +89,7 @@ def build_config(args, run_dir: Path):
         sim_dir=run_dir / "simulation",
         log_csv=run_dir / "fl_log.csv",
     )
-    data = DataCfg(); model = ModelCfg(); train = TrainCfg(); reward = RewardCfg(); attack = AttackCfg()
+    data = DataCfg(); model = ModelCfg(); train = TrainCfg(); reward = RewardCfg(); attack = AttackCfg(); aggregation = AggregationCfg()
     # overrides
     if getattr(args, "dataset", None) is not None: data.name = args.dataset
     if getattr(args, "model", None) is not None: model.name = args.model
@@ -117,4 +122,6 @@ def build_config(args, run_dir: Path):
     if getattr(args, "spoof_mode", None) is not None: attack.spoof_mode = args.spoof_mode
     if getattr(args, "malicious_seed", None) is not None: attack.seed = args.malicious_seed
 
-    return Cfg(data=data, model=model, train=train, reward=reward, attack=attack, paths=paths)
+    if getattr(args, "agg_strategy", None) is not None: aggregation.strategy = args.agg_strategy
+
+    return Cfg(data=data, model=model, train=train, reward=reward, attack=attack, paths=paths, aggregation=aggregation)
