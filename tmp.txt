@@ -1,0 +1,16 @@
+# honest 
+python run_experiment.py --exp benign --partitioner dirichlet --alpha 0.3   --nodes 10 --rounds 10 --epochs 30 --upload-delta --save-updates
+
+python run_experiment.py --exp benign --partitioner dirichlet --alpha 0.3   --nodes 10 --rounds 10 --epochs 30 --upload-delta --base-reward 100 --committee-size 3 --penalize-negative False
+
+
+# attack mode 1
+python run_experiment.py --exp mal_signflip_10 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.10 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+python run_experiment.py --exp mal_signflip_20 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.20 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+python run_experiment.py --exp mal_signflip_30 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.30 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+python run_experiment.py --exp mal_signflip_40 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.40 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+python run_experiment.py --exp mal_signflip_50 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.50 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+
+# attack mode 2
+python run_experiment.py --exp mal_gaussian_10 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.10 --malicious-strategy signflip --scale 5   --spoof-mode high_acc --upload-delta --save-updates
+python run_experiment.py --exp mal_gaussian_10 --nodes 10 --rounds 10 --epochs 30  --malicious-frac 0.10 --malicious-strategy signflip --scale 5   --spoof-mode low_acc --upload-delta --save-updates
