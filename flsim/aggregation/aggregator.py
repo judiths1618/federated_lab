@@ -168,7 +168,10 @@ class Aggregator:
 
     def aggregate_round(self, r: int, base_cid: str):
         subs = self.contract.get_round_submissions(r)
+        # base_sd 是第 r 轮开始时的全局模型，用于还原每个客户端的本地模型
         base_sd = self.ipfs.load(base_cid)
+        # 保存 base 方便之后结合各节点的 delta 重建其训练后的模型
+        torch.save(base_sd, os.path.join(self.save_dir, "models", f"global_round_{r}_base.pt"))
 
         realized_states: List[Dict[str, torch.Tensor]] = []
         weights: List[float] = []
@@ -180,7 +183,8 @@ class Aggregator:
         tmp_aligns: List[float] = []
         tmp_accs: List[float] = []
         tmp_losses: List[float] = []
-        deltas: List[Dict[str, torch.Tensor]] = []   # keep raw deltas for eval
+        deltas: List[Dict[str, torch.Tensor]] = []   # keep raw updates for eval
+        upd_types: List[str] = []
 
         # ---------- 1) realize (base + delta) & collect ----------
         for nid, (mcid, mtcid, updtype) in subs.items():
@@ -222,6 +226,7 @@ class Aggregator:
 
             # 1.5 保存原始 delta 以便评测（更直观地用 base+delta）
             deltas.append(upd)
+            upd_types.append(updtype)
 
         # ---------- 2) committee ----------
         try:
@@ -235,14 +240,31 @@ class Aggregator:
         # ---------- 3) eval reconstructed models (base + delta) ----------
   
         if realized_states:
-            # 用 base + delta 的批量评测（与我们讨论的设计一致）
-            eval_accs = evaluate_reconstructed_batch(
-                base_state=base_sd,
-                deltas=deltas,
-                dataset=self.dataset_name,
-                model_hint=self.model_name,
-                max_workers=4,
-            )
+            # 按 update_type 分组评测：delta -> base+delta，state -> 直接评测
+            eval_accs = [float("nan")] * len(deltas)
+            delta_idx = [i for i, t in enumerate(upd_types) if t == "delta"]
+            state_idx = [i for i, t in enumerate(upd_types) if t != "delta"]
+            if delta_idx:
+                delta_updates = [deltas[i] for i in delta_idx]
+                delta_accs = evaluate_reconstructed_batch(
+                    base_state=base_sd,
+                    deltas=delta_updates,
+                    dataset=self.dataset_name,
+                    model_hint=self.model_name,
+                    max_workers=4,
+                )
+                for i, acc in zip(delta_idx, delta_accs):
+                    eval_accs[i] = acc
+            if state_idx:
+                state_updates = [deltas[i] for i in state_idx]
+                state_accs = evaluate_many_state_dicts(
+                    state_updates,
+                    dataset=self.dataset_name,
+                    model_hint=self.model_name,
+                    max_workers=4,
+                )
+                for i, acc in zip(state_idx, state_accs):
+                    eval_accs[i] = acc
         else:
             # 无提交：直接维持 base
             agg_sd = base_sd
