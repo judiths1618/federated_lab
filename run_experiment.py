@@ -29,6 +29,7 @@ def main():
     ap.add_argument("--hist-decay", type=float, default=None)
     ap.add_argument("--reward-rate", type=float, default=None)
     ap.add_argument("--penalize-negative", action="store_true")
+    ap.add_argument("--agg-strategy", type=str, default=None, help="Aggregation strategy (e.g., fedavg)")
     # attacks
     ap.add_argument("--malicious-frac", type=float, default=None, help="0.0~1.0 fraction of malicious clients")
     ap.add_argument("--malicious-strategy", type=str, default=None, choices=["none","signflip","scaling","gaussian","label_flip","metric_spoof"])
