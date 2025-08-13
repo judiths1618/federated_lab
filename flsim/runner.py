@@ -81,7 +81,6 @@ class FLRunner:
                     n.cfg.node_id,
                     stake=getattr(n, "stake", 100.0),
                     reputation=getattr(n, "reputation", 10.0),
-                    particiption=n.key_pair.participation_key,
                 )
             except Exception:
                 pass
