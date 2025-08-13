@@ -33,18 +33,12 @@ class TrainCfg:
 class RewardCfg:
     base_reward: float = 100.0
     stake_weight: float = 0.4
-    committee_size: int = 10
     hist_decay: float = 0.9
     reward_rate: float = 1.0
     penalize_negative: bool = False
     committee_bonus: float = 0.10
     mal_eval_diff_thresh: float = 0.15
-    base_reward: float = 100.0
-    stake_weight: float = 0.4
     committee_size: int = 3
-    hist_decay: float = 0.9
-    reward_rate: float = 1.0
-    penalize_negative: bool = False
 
 @dataclass
 class AttackCfg:

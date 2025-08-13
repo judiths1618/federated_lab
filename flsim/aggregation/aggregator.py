@@ -6,8 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
-from ..eval import evaluate_many_state_dicts
-
+from ..eval import evaluate_reconstructed_batch, evaluate_many_state_dicts
 
 class Aggregator:
     """
@@ -175,17 +174,34 @@ class Aggregator:
         weights: List[float] = []
         metrics_map: Dict[int, Dict] = {}
 
-        # For contribution scoring features
-        tmp_nodes, tmp_norms, tmp_aligns, tmp_accs, tmp_losses = [], [], [], [], []
+        # for scoring
+        tmp_nodes: List[int] = []
+        tmp_norms: List[float] = []
+        tmp_aligns: List[float] = []
+        tmp_accs: List[float] = []
+        tmp_losses: List[float] = []
+        deltas: List[Dict[str, torch.Tensor]] = []   # keep raw deltas for eval
 
-        # 1) First pass: realize client states and collect raw features
+        # ---------- 1) realize (base + delta) & collect ----------
         for nid, (mcid, mtcid, updtype) in subs.items():
-            upd = self.ipfs.load(mcid)
+            upd = self.ipfs.load(mcid)   # submission 里是 delta
             mt = self.ipfs.load(mtcid)
+            updtype = (updtype or "delta").lower()
+            if updtype not in ("delta", "state"):
+                updtype = "delta"
+
+            # 1.1 还原本地模型（用于聚合与对齐）
             realized = self._apply_update(base_sd, upd, updtype)
             realized_states.append(realized)
-            weights.append(mt.get("samples", 1))
 
+            # 1.2 训练样本权重
+            samples = mt.get("samples", 1)
+            try:
+                weights.append(float(samples))
+            except Exception:
+                weights.append(1.0)
+
+            # 1.3 上报度量与元数据
             metrics_map[nid] = {
                 **mt,
                 "update_cid": mcid,
@@ -193,63 +209,77 @@ class Aggregator:
                 "update_type": updtype,
             }
 
-            # delta 向量化用于 norm & 对齐
-            delta = {k: realized[k] - base_sd[k] for k in base_sd.keys()}
+            # 1.4 向量化 delta（用于范数/对齐）
+            common = realized.keys() & base_sd.keys()
+            delta = {k: realized[k] - base_sd[k] for k in common}
             delta_vec = self._flatten_sd(delta)
 
             tmp_nodes.append(nid)
             tmp_norms.append(float(torch.linalg.norm(delta_vec)))
             tmp_accs.append(float(mt.get("acc", float("nan"))))
             tmp_losses.append(float(mt.get("loss", float("nan"))))
-            tmp_aligns.append(float("nan"))  # 待会儿算
+            tmp_aligns.append(float("nan"))
 
-        # 4) 选委员会（供策略使用 + 奖励计算）
+            # 1.5 保存原始 delta 以便评测（更直观地用 base+delta）
+            deltas.append(upd)
+
+        # ---------- 2) committee ----------
         try:
             committee_ids = self.contract.set_committee(r, self.nodes)
         except TypeError:
-            fallback_ids = self._calc_committee()
-            maybe_ids = self.contract.set_committee(r, fallback_ids)
-            committee_ids = maybe_ids if isinstance(maybe_ids, list) else fallback_ids
+            fallback = self._calc_committee()
+            maybe = self.contract.set_committee(r, fallback)
+            committee_ids = maybe if isinstance(maybe, list) else fallback
         committee_ids = set(committee_ids or [])
 
-        # 4.5) 并行评测本地模型
-        eval_accs = evaluate_many_state_dicts(
-            realized_states,
-            dataset=self.dataset_name,
-            model_hint=self.model_name,
-            max_workers=4,
-        )
+        # ---------- 3) eval reconstructed models (base + delta) ----------
+  
+        if realized_states:
+            # 用 base + delta 的批量评测（与我们讨论的设计一致）
+            eval_accs = evaluate_reconstructed_batch(
+                base_state=base_sd,
+                deltas=deltas,
+                dataset=self.dataset_name,
+                model_hint=self.model_name,
+                max_workers=4,
+            )
+        else:
+            # 无提交：直接维持 base
+            agg_sd = base_sd
+            new_cid = self.ipfs.save(agg_sd)
+            self.contract.set_global_model(r + 1, new_cid)
+            self.contract.settle_round(r)
+            return new_cid, {}, {}, {}
 
-        # 5) 根据策略聚合 -> 新全局
-        meta = {"node_ids": tmp_nodes, "committee_ids": committee_ids}
-        agg_sd = self.strategy.aggregate(realized_states, weights, base_sd=base_sd, meta=meta)
+        # ---------- 4) aggregate -> new global ----------
+        meta = {"node_ids": tmp_nodes, "committee_ids": list(committee_ids)}
+        if hasattr(self, "strategy") and hasattr(self.strategy, "aggregate"):
+            agg_sd = self.strategy.aggregate(realized_states, weights, base_sd=base_sd, meta=meta)
+        else:
+            agg_sd = self.fedavg_weighted(realized_states, weights)
+
         new_cid = self.ipfs.save(agg_sd)
         torch.save(agg_sd, os.path.join(self.save_dir, "models", f"global_round_{r}.pt"))
         self.contract.set_global_model(r + 1, new_cid)
 
-        # 3) Aggregation direction for this round
+        # ---------- 5) alignment ----------
         agg_delta = {k: agg_sd[k] - base_sd[k] for k in base_sd.keys()}
         agg_vec = self._flatten_sd(agg_delta)
-
-        # 4) 计算对齐度
         for i in range(len(tmp_nodes)):
-            realized = realized_states[i]
-            delta = {k: realized[k] - base_sd[k] for k in base_sd.keys()}
-            delta_vec = self._flatten_sd(delta)
-            tmp_aligns[i] = self._cosine(delta_vec, agg_vec)
+            delta_i = {k: realized_states[i][k] - base_sd[k] for k in base_sd.keys()}
+            delta_vec_i = self._flatten_sd(delta_i)
+            tmp_aligns[i] = self._cosine(delta_vec_i, agg_vec)
 
-      
-
-        # 5) Robust normalization within round and compute contribution score
-        align_01 = np.array([(a + 1.0) / 2.0 for a in tmp_aligns], dtype=float)  # [-1,1] -> [0,1]
-        norm_n = self._robust_minmax(np.array(tmp_norms))
-        align_n = self._robust_minmax(align_01)
-        acc_n = self._robust_minmax(np.array(tmp_accs))
-        loss_01 = self._robust_minmax(np.array(tmp_losses))
+        # ---------- 6) contribution scoring ----------
+        align_01  = np.array([(a + 1.0) / 2.0 for a in tmp_aligns], dtype=float)
+        norm_n    = self._robust_minmax(np.array(tmp_norms))
+        align_n   = self._robust_minmax(align_01)
+        acc_n     = self._robust_minmax(np.array(tmp_accs))
+        loss_01   = self._robust_minmax(np.array(tmp_losses))
         loss_good = 1.0 - loss_01
         scores = self.W_ALIGN * align_n + self.W_ACC * acc_n + self.W_LOSS * loss_good + self.W_NORM * norm_n
 
-        # 7) 提交贡献、记录特征、计算奖励
+        # ---------- 7) commit & reward ----------
         contrib_map: Dict[int, float] = {}
         reward_map: Dict[int, float] = {}
         node_by_id = {n.cfg.node_id: n for n in self.nodes}
@@ -257,33 +287,30 @@ class Aggregator:
 
         for i, nid in enumerate(tmp_nodes):
             score = float(scores[i]) if i < len(scores) else float("nan")
-
-            # 7.1) 写入合约的本轮贡献
             self.contract.set_contribution(r, nid, score)
             contrib_map[nid] = score
-            print(f"Node {nid} contribution: {score:.4f}")
 
-            # 7.2) **写入本地节点的贡献历史**（保证本轮立刻可见）
             node = node_by_id.get(nid)
             if node is not None:
                 if not hasattr(node, "contrib_history") or node.contrib_history is None:
                     node.contrib_history = []
                 node.contrib_history.append(score)
 
-            # 7.3) 送入评测特征（用于链上恶意检测）
             claimed = float(metrics_map.get(nid, {}).get("acc", float("nan")))
             evalacc = float(eval_accs[i]) if i < len(eval_accs) else float("nan")
+            print(f"Node {nid} claimed={claimed:.4f}, eval={evalacc:.4f}, score={score:.4f}")
             self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
 
-            # 7.4) 计算奖励并提交
             in_committee = (nid in committee_ids)
             rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
             self.contract.add_reward(r, nid, rew)
             reward_map[nid] = rew
 
-        print(f"Round {r}: committee={committee_ids} | avg_rep={avg_rep:.4f}, contribs={contrib_map} and rewards={reward_map}")
-        # 8) 结算（更新 stake / reputation / penalties / mal flags）
+        # ---------- 8) settle ----------
         self.contract.settle_round(r)
-        print(f"Round {r}: committee={committee_ids} | avg_rep={avg_rep:.4f}, contribs={contrib_map} and rewards={reward_map}")
-        
+
+        print(f"[Round {r}] committee={sorted(committee_ids)} | avg_rep={avg_rep:.4f}")
+        print(f"[Round {r}] contribs={contrib_map}")
+        print(f"[Round {r}] rewards={reward_map}")
+
         return new_cid, metrics_map, contrib_map, reward_map

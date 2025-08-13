@@ -481,7 +481,7 @@ class ContractSim:
             # Suspicious decision:
             #  - only non-negative diff matters: diff = max(0, claimed - eval)
             #  - threshold = max( final_tau (IQR/default/pre_tau), mal_min_gap, a + b*(1-claimed) )
-            if math.isfinite(claimed) and math.isfinite(evalacc)):
+            if math.isfinite(claimed) and math.isfinite(evalacc):
                 diff = max(0.0, claimed - evalacc)
                 allowed_rel = a + b * max(0.0, 1.0 - claimed)
                 # 终阈值：三者取最大
