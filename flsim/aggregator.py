@@ -1,4 +1,4 @@
-from .eval import evaluate_many_state_dicts
+from .eval import evaluate_state_dict
 import os
 import math
 from typing import Dict, List, Optional
@@ -185,7 +185,7 @@ class Aggregator:
         # For contribution scoring features
         tmp_nodes, tmp_norms, tmp_aligns, tmp_accs, tmp_losses = [], [], [], [], []
 
-        # 1) First pass: realize client states and collect raw features
+        # 1) First pass: realize client states, evaluate, and collect raw features
         for nid, (mcid, mtcid, updtype) in subs.items():
             upd = self.ipfs.load(mcid)
             mt = self.ipfs.load(mtcid)
@@ -193,12 +193,31 @@ class Aggregator:
             realized_states.append(realized)
             weights.append(mt.get("samples", 1))
 
+            # Evaluate reconstructed client model on test set
+            eval_acc = float(
+                evaluate_state_dict(
+                    realized,
+                    dataset=self.dataset_name,
+                    model_hint=self.model_name,
+                )
+            )
+
             metrics_map[nid] = {
                 **mt,
                 "update_cid": mcid,
                 "metrics_cid": mtcid,
                 "update_type": updtype,
+                "eval_acc": eval_acc,
             }
+
+            # Record claimed vs evaluated accuracy for later settlement
+            claimed_acc = float(mt.get("acc", float("nan")))
+            self.contract.set_features(
+                r,
+                nid,
+                claimed_acc=claimed_acc,
+                eval_acc=eval_acc,
+            )
 
             # delta 向量化用于 norm & 对齐
             delta = {k: realized[k] - base_sd[k] for k in base_sd.keys()}
@@ -206,17 +225,9 @@ class Aggregator:
 
             tmp_nodes.append(nid)
             tmp_norms.append(float(torch.linalg.norm(delta_vec)))
-            tmp_accs.append(float(mt.get("acc", float("nan"))))
+            tmp_accs.append(claimed_acc)
             tmp_losses.append(float(mt.get("loss", float("nan"))))
             tmp_aligns.append(float("nan"))  # 待会儿算
-
-        # 4.5) 并行评测本地模型
-        eval_accs = evaluate_many_state_dicts(
-            realized_states,
-            dataset=self.dataset_name,
-            model_hint=self.model_name,
-            max_workers=4,
-        )
         
         # 2) FedAvg aggregate -> new global
         agg_sd = self.fedavg_weighted(realized_states, weights)
@@ -234,8 +245,6 @@ class Aggregator:
             delta = {k: realized[k] - base_sd[k] for k in base_sd.keys()}
             delta_vec = self._flatten_sd(delta)
             tmp_aligns[i] = self._cosine(delta_vec, agg_vec)
-
-      
 
         # 5) Robust normalization within round and compute contribution score
         align_01 = np.array([(a + 1.0) / 2.0 for a in tmp_aligns], dtype=float)  # [-1,1] -> [0,1]
@@ -279,12 +288,7 @@ class Aggregator:
                     node.contrib_history = []
                 node.contrib_history.append(score)
 
-            # 7.3) 送入评测特征（用于链上恶意检测）
-            claimed = float(metrics_map.get(nid, {}).get("acc", float("nan")))
-            evalacc = float(eval_accs[i]) if i < len(eval_accs) else float("nan")
-            self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
-
-            # 7.4) 计算奖励并提交
+            # 7.3) 计算奖励并提交
             in_committee = (nid in committee_ids)
             rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
             self.contract.add_reward(r, nid, rew)

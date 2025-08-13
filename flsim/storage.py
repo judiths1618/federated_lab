@@ -368,27 +368,11 @@ class ContractSim:
             claimed = float(feat.get("claimed_acc", float("nan")))
             evalacc = float(feat.get("eval_acc", float("nan")))
 
-            # 使用 Aggregator 写入的阈值；若缺失则回退到 params
-            final_tau = float(feat.get("pre_tau", float(getattr(self.params, "mal_eval_diff_thresh", 0.15))))
-            mal_min_gap = float(feat.get("pre_min_gap", float(getattr(self.params, "mal_min_gap", 0.05))))
-
+            # simple gap-based malicious detection
             if math.isfinite(claimed) and math.isfinite(evalacc):
-                diff = max(0.0, claimed - evalacc)  # 非负差额
-                # 可选：相对阈值，claimed 越高允许更大 gap
-                a = float(getattr(self.params, "mal_allowed_base", 0.05))
-                b = float(getattr(self.params, "mal_allowed_slope", 0.20))
-                allowed_rel = a + b * max(0.0, 1.0 - claimed)
-                # 终阈值：三者取最大
-                tau = max(final_tau, mal_min_gap, allowed_rel)
-                suspicious = (diff > tau)
-            else:
-                # 没有 eval 时，回退到贡献分阈值
-                suspicious = (score < float(self.params.detect_score_thresh))
-
-            if not (math.isnan(claimed) or math.isnan(evalacc)):
                 suspicious = (claimed - evalacc) > float(self.params.mal_eval_diff_thresh)
             else:
-                suspicious = (score < float(self.params.detect_score_thresh))
+                suspicious = False
 
             self.mal_detected[r][nid] = int(bool(suspicious))
 
