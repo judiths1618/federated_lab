@@ -38,7 +38,7 @@ class RewardCfg:
     penalize_negative: bool = False
     committee_bonus: float = 0.10
     mal_eval_diff_thresh: float = 0.15
-    committee_size: int = 3
+    committee_size: int = 10
 
 @dataclass
 class AttackCfg:

@@ -170,7 +170,7 @@ class ContractSim:
         self.nodes[int(node_id)] = {
             "stake": float(stake),
             "reputation": float(reputation),
-            "cooldown": 0.0,
+            "cooldown": 3.0,
             "contrib_history": [],
             "participation": 0,   # <— 新增：参与轮数统计
         }

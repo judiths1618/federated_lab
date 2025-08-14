@@ -57,7 +57,7 @@ def _make_model(model_hint: Optional[str], dataset_kind: str):
             return SimpleCIFAR10()
         if 'linear' in h or 'mnist' in h:
             return LinearMNIST()
-    return LinearMNIST() if dataset_kind == 'mnist' else SimpleCIFAR10()
+    # return LinearMNIST() if dataset_kind == 'mnist' else SimpleCIFAR10()
     # return model_hint
 
 

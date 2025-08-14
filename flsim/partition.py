@@ -7,7 +7,8 @@ from flwr_datasets.partitioner import (
 
 def build_partitioner(method: str, num_nodes: int, *, alpha: float, classes_per_node: int, shards_per_node: int):
     if method == "iid":
-        return IidPartitioner(num_partitions=num_nodes, shuffle=True, seed=42)
+        # return IidPartitioner(num_partitions=num_nodes, shuffle=True, seed=42)
+        return IidPartitioner(num_partitions=num_nodes)
     if method == "dirichlet":
         return DirichletPartitioner(num_partitions=num_nodes, partition_by="label", alpha=alpha, shuffle=True, seed=42)
     if method == "pathological":

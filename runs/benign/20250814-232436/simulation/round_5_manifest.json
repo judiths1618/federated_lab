@@ -1,0 +1,122 @@
+[
+  {
+    "round": 5,
+    "node_id": 0,
+    "samples": 7682,
+    "loss": 0.1610714672936238,
+    "acc": 0.9552677254187277,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000111",
+    "metrics_cid": "Qm00000112",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 1,
+    "samples": 6725,
+    "loss": 0.09461816620621934,
+    "acc": 0.9708550185873606,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000113",
+    "metrics_cid": "Qm00000114",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 2,
+    "samples": 1321,
+    "loss": 0.09738534566904732,
+    "acc": 0.9710320464294726,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000115",
+    "metrics_cid": "Qm00000116",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 3,
+    "samples": 9621,
+    "loss": 0.18242598047572078,
+    "acc": 0.9469528462044833,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000117",
+    "metrics_cid": "Qm00000118",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 4,
+    "samples": 5106,
+    "loss": 0.13310842624361932,
+    "acc": 0.9655438046742395,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000119",
+    "metrics_cid": "Qm00000120",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 5,
+    "samples": 4853,
+    "loss": 0.1568089436064428,
+    "acc": 0.9529981454770245,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000121",
+    "metrics_cid": "Qm00000122",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 6,
+    "samples": 2291,
+    "loss": 0.16269305820206784,
+    "acc": 0.9510839516950386,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000123",
+    "metrics_cid": "Qm00000124",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 7,
+    "samples": 11672,
+    "loss": 0.17587467154310513,
+    "acc": 0.9494116975097099,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000125",
+    "metrics_cid": "Qm00000126",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 8,
+    "samples": 7419,
+    "loss": 0.11682560023507191,
+    "acc": 0.9643527878869569,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000127",
+    "metrics_cid": "Qm00000128",
+    "is_malicious": 0,
+    "strategy": "none"
+  },
+  {
+    "round": 5,
+    "node_id": 9,
+    "samples": 3310,
+    "loss": 0.15074022395965855,
+    "acc": 0.95460221550856,
+    "update_type": "delta",
+    "model_update_cid": "Qm00000129",
+    "metrics_cid": "Qm00000130",
+    "is_malicious": 0,
+    "strategy": "none"
+  }
+]

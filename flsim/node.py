@@ -60,12 +60,12 @@ class LocalNode:
     def train_one_round(self, round_idx: int, global_model_cid: str):
         base_sd = self.ipfs.load(global_model_cid)
         # Save base (CPU tensors) to models/; include node id to avoid clobbering
-        models_dir = os.path.join(self.save_dir, "models")
-        os.makedirs(models_dir, exist_ok=True)
-        base_cpu = {k: (v.detach().cpu() if torch.is_tensor(v) else v) for k, v in base_sd.items()}
-        base_fname = os.path.join(models_dir, f"base_round_{round_idx}_node_{self.cfg.node_id}.pt")
-        if not os.path.exists(base_fname):  # avoid overwriting if called multiple times
-            torch.save(base_cpu, base_fname)
+        # models_dir = os.path.join(self.save_dir, "models")
+        # os.makedirs(models_dir, exist_ok=True)
+        # base_cpu = {k: (v.detach().cpu() if torch.is_tensor(v) else v) for k, v in base_sd.items()}
+        # base_fname = os.path.join(models_dir, f"base_round_{round_idx}_node_{self.cfg.node_id}.pt")
+        # if not os.path.exists(base_fname):  # avoid overwriting if called multiple times
+        #     torch.save(base_cpu, base_fname)
 
         model = LinearMNIST(); model.load_state_dict(base_sd); model.train()
         opt = optim.SGD(model.parameters(), lr=self.cfg.lr)
@@ -92,20 +92,20 @@ class LocalNode:
 
         # 2.1 Evaluate the updated FULL model (before any mutation), on test/val
         # Choose dataset/model_hint; fall back if not present on cfg
-        dataset_name = getattr(getattr(self, "cfg", None), "dataset_name", None) or \
-                    getattr(getattr(self, "data_cfg", None), "name", None) or "mnist"
+        # dataset_name = getattr(getattr(self, "cfg", None), "dataset_name", None) or \
+                    # getattr(getattr(self, "data_cfg", None), "name", None) or "mnist"
         # model_hint   = getattr(getattr(self, "cfg", None), "model_name", None) or "linear-mnist"
 
-        print(dataset_name, model)
-        eval_acc_updated = evaluate_state_dict(
-            updated_sd,
-            dataset=dataset_name,
-            model_hint=model,
-            # base_state=None, update_type='state' by default
-        )
+        # print(dataset_name, model)
+        # eval_acc_updated = evaluate_state_dict(
+        #     updated_sd,
+        #     dataset=dataset_name,
+        #     model_hint=model,
+        #     # base_state=None, update_type='state' by default
+        # )
         # keep it for logging/inspection
-        self.last_eval_acc_updated = float(eval_acc_updated)
-        print(f"Node {self.cfg.node_id} round {round_idx} updated model, acc: {acc}, avg_loss: {avg_loss}, eval acc: {eval_acc_updated:.4f}")
+        # self.last_eval_acc_updated = float(eval_acc_updated)
+        # print(f"Node {self.cfg.node_id} round {round_idx} updated model, acc: {acc}, avg_loss: {avg_loss}, eval acc: {eval_acc_updated:.4f}")
         
         if self.upload_delta:
             update_obj, update_type = self._compute_delta(updated_sd, base_sd), "delta"
