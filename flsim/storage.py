@@ -1,8 +1,8 @@
-from typing import Dict, Tuple, List, Any
 from dataclasses import dataclass
 import math
 import random  # NEW: use random.random()
 import numpy as np  # 确保文件顶部已导入
+from typing import Any, Dict, List, Tuple
 
 # --------------------------- helpers ---------------------------
 
@@ -327,6 +327,26 @@ class ContractSim:
 
     # ---------------- features & settlement ----------------
 
+    @staticmethod
+    def _is_suspicious(
+        claimed: float,
+        evalacc: float,
+        score: float,
+        *,
+        final_tau: float,
+        mal_min_gap: float,
+        a: float,
+        b: float,
+        detect_score_thresh: float,
+    ) -> bool:
+        """Return True if accuracy gap or score indicates malicious behaviour."""
+        if math.isfinite(claimed) and math.isfinite(evalacc):
+            diff = max(0.0, claimed - evalacc)
+            allowed_rel = a + b * max(0.0, 1.0 - claimed)
+            tau = max(final_tau, mal_min_gap, allowed_rel)
+            return diff > tau
+        return score < detect_score_thresh
+
     def set_features(self, round_idx: int, node_id: int, **kwargs):
         rec = dict(kwargs)
         self.features.setdefault(int(round_idx), {})[int(node_id)] = {
@@ -401,16 +421,16 @@ class ContractSim:
             claimed = float(feat.get("claimed_acc", float("nan")))
             evalacc = float(feat.get("eval_acc", float("nan")))
 
-            # Suspicious decision:
-            #  - only non-negative diff matters: diff = max(0, claimed - eval)
-            #  - threshold = max( final_tau (IQR/default/pre_tau), mal_min_gap, a + b*(1-claimed) )
-            if math.isfinite(claimed) and math.isfinite(evalacc):
-                diff = max(0.0, claimed - evalacc)
-                allowed_rel = a + b * max(0.0, 1.0 - claimed)
-                tau = max(final_tau, mal_min_gap, allowed_rel)
-                suspicious = (diff > tau)
-            else:
-                suspicious = (score < detect_score_thresh)
+            suspicious = self._is_suspicious(
+                claimed,
+                evalacc,
+                score,
+                final_tau=final_tau,
+                mal_min_gap=mal_min_gap,
+                a=a,
+                b=b,
+                detect_score_thresh=detect_score_thresh,
+            )
 
             self.mal_detected[r][nid] = int(bool(suspicious))
 
