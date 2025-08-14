@@ -66,6 +66,7 @@ class IncentiveParams:
     mal_eval_diff_thresh: float = 0.15
     # optional but useful knobs
     committee_size: int = 10
+    committee_cooldown: int = 1  # rounds a selected node must wait before rejoining
     # —— 误判保护 & 检测（如果你已加过可以忽略）——
     mal_min_gap: float = 0.05
     mal_allowed_base: float = 0.05
@@ -313,10 +314,14 @@ class ContractSim:
         self.committees[int(round_idx)] = committee_ids
         self.committee_history.append(committee_ids)
 
-        # optional: mark cooldown (if你希望)
+        # decrement existing cooldowns
+        for info in self.nodes.values():
+            info["cooldown"] = max(0.0, float(info.get("cooldown", 0.0)) - 1.0)
+
+        cd_rounds = int(getattr(self.params, "committee_cooldown", 1))
         for nid in committee_ids:
             if nid in self.nodes:
-                self.nodes[nid]["cooldown"] = float(self.nodes[nid].get("cooldown", 0.0))
+                self.nodes[nid]["cooldown"] = float(cd_rounds)
 
         return committee_ids
 
@@ -359,7 +364,7 @@ class ContractSim:
             if math.isfinite(cl) and math.isfinite(ev):
                 diffs.append(max(0.0, cl - ev))
 
-        default_abs_tau = float(getattr(self.params, "mal_eval_diff_thresh", 0.15))
+        base_tau = float(getattr(self.params, "mal_eval_diff_thresh", 0.15))
         if len(diffs) >= 4:
             vals = np.asarray(diffs, dtype=float)
             q1, q3 = np.percentile(vals, [25, 75])
@@ -368,14 +373,15 @@ class ContractSim:
         else:
             adaptive_tau = float("nan")
 
-        # Allow aggregator to pass a per-round tau via features['pre_tau'] (if present)
         pre_taus = [float(f.get("pre_tau")) for f in feats_r.values() if "pre_tau" in f]
         pre_tau = pre_taus[0] if pre_taus else float("nan")
 
-        final_tau = default_abs_tau
-        for candidate in (pre_tau, adaptive_tau):
-            if math.isfinite(candidate):
-                final_tau = max(final_tau, float(candidate))
+        tau_candidates = [base_tau]
+        if math.isfinite(pre_tau):
+            tau_candidates.append(pre_tau)
+        if math.isfinite(adaptive_tau):
+            tau_candidates.append(adaptive_tau)
+        final_tau = max(tau_candidates)
 
         mal_min_gap = float(getattr(self.params, "mal_min_gap", 0.05))
         a = float(getattr(self.params, "mal_allowed_base", 0.05))
@@ -401,17 +407,10 @@ class ContractSim:
             if math.isfinite(claimed) and math.isfinite(evalacc):
                 diff = max(0.0, claimed - evalacc)
                 allowed_rel = a + b * max(0.0, 1.0 - claimed)
-                # 终阈值：三者取最大
                 tau = max(final_tau, mal_min_gap, allowed_rel)
                 suspicious = (diff > tau)
             else:
-                # 没有 eval 时，回退到贡献分阈值
-                suspicious = (score < float(self.params.detect_score_thresh))
-
-            if not (math.isnan(claimed) or math.isnan(evalacc)):
-                suspicious = (claimed - evalacc) > float(self.params.mal_eval_diff_thresh)
-            else:
-                suspicious = (score < float(self.params.detect_score_thresh))
+                suspicious = (score < detect_score_thresh)
 
             self.mal_detected[r][nid] = int(bool(suspicious))
 

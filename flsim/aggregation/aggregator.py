@@ -129,9 +129,10 @@ class Aggregator:
             + committee_bonus
         )
         print(f"Node {node.cfg.node_id} reward before clipping: {reward:.4f}")
+        reward *= self.reward_rate
+        if self.penalize_negative:
+            reward = max(0.0, reward)
         return reward
-        # reward_clipped = max(self.clip_min, min(self.clip_max, reward))
-        # return self.reward_rate * (reward_clipped if self.penalize_negative else max(0.0, reward_clipped))
 
     @staticmethod
     def _flatten_sd(sd: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -165,6 +166,18 @@ class Aggregator:
                 return np.zeros_like(x)
             return np.clip((x - xmin) / (xmax - xmin), 0.0, 1.0)
         return np.clip((x - q1) / (q3 - q1), 0.0, 1.0)
+
+    @staticmethod
+    def fedavg_weighted(states: List[Dict[str, torch.Tensor]], weights: List[float]) -> Dict[str, torch.Tensor]:
+        if not states:
+            return {}
+        total = float(sum(weights)) or 1.0
+        agg = {k: torch.zeros_like(v) for k, v in states[0].items()}
+        for sd, w in zip(states, weights):
+            scale = float(w) / total
+            for k, v in sd.items():
+                agg[k] += v * scale
+        return agg
 
     def aggregate_round(self, r: int, base_cid: str):
         # subs = self.contract.get_round_submissions(r)
