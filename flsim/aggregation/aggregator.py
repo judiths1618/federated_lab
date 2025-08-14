@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
-from ..eval import evaluate_reconstructed_batch, evaluate_many_state_dicts
+from ..eval import evaluate_reconstructed_batch, evaluate_many_state_dicts, reconstruct_state
 
 class Aggregator:
     """
@@ -167,11 +167,19 @@ class Aggregator:
         return np.clip((x - q1) / (q3 - q1), 0.0, 1.0)
 
     def aggregate_round(self, r: int, base_cid: str):
-        subs = self.contract.get_round_submissions(r)
-        # base_sd 是第 r 轮开始时的全局模型，用于还原每个客户端的本地模型
-        base_sd = self.ipfs.load(base_cid)
+        # subs = self.contract.get_round_submissions(r)
+        # # base_sd 是第 r 轮开始时的全局模型，用于还原每个客户端的本地模型
+        # base_sd = self.ipfs.load(base_cid)
         # 保存 base 方便之后结合各节点的 delta 重建其训练后的模型
-        torch.save(base_sd, os.path.join(self.save_dir, "models", f"global_round_{r}_base.pt"))
+        # torch.save(base_sd, os.path.join(self.save_dir, "models", f"global_round_{r}_base.pt"))
+
+        subs = self.contract.get_round_submissions(r)
+        base_sd = self.ipfs.load(base_cid)
+
+        realized_states, weights, metrics_map = [], [], []
+        tmp_nodes, tmp_norms, tmp_aligns, tmp_accs, tmp_losses = [], [], [], [], []
+
+        # metrics_map = {}
 
         realized_states: List[Dict[str, torch.Tensor]] = []
         weights: List[float] = []
@@ -186,26 +194,20 @@ class Aggregator:
         deltas: List[Dict[str, torch.Tensor]] = []   # keep raw updates for eval
         upd_types: List[str] = []
 
-        # ---------- 1) realize (base + delta) & collect ----------
+        # 1) 还原本地模型 & 收集特征
         for nid, (mcid, mtcid, updtype) in subs.items():
-            upd = self.ipfs.load(mcid)   # submission 里是 delta
-            mt = self.ipfs.load(mtcid)
+            upd = self.ipfs.load(mcid)          # 可能是 delta 或完整 state
+            mt  = self.ipfs.load(mtcid)
             updtype = (updtype or "delta").lower()
-            if updtype not in ("delta", "state"):
-                updtype = "delta"
 
-            # 1.1 还原本地模型（用于聚合与对齐）
-            realized = self._apply_update(base_sd, upd, updtype)
+            # --- 重构全量本地模型 ---
+            realized = reconstruct_state(base_sd, upd, updtype)
             realized_states.append(realized)
 
-            # 1.2 训练样本权重
+            # 训练样本权重
             samples = mt.get("samples", 1)
-            try:
-                weights.append(float(samples))
-            except Exception:
-                weights.append(1.0)
+            weights.append(float(samples) if isinstance(samples, (int, float)) else 1.0)
 
-            # 1.3 上报度量与元数据
             metrics_map[nid] = {
                 **mt,
                 "update_cid": mcid,
@@ -213,20 +215,16 @@ class Aggregator:
                 "update_type": updtype,
             }
 
-            # 1.4 向量化 delta（用于范数/对齐）
+            # 计算 delta（用于范数/对齐）
             common = realized.keys() & base_sd.keys()
-            delta = {k: realized[k] - base_sd[k] for k in common}
+            delta = {k: realized[k] - base_sd[k] for k in common if torch.is_tensor(realized[k]) and torch.is_tensor(base_sd[k])}
             delta_vec = self._flatten_sd(delta)
 
             tmp_nodes.append(nid)
             tmp_norms.append(float(torch.linalg.norm(delta_vec)))
             tmp_accs.append(float(mt.get("acc", float("nan"))))
             tmp_losses.append(float(mt.get("loss", float("nan"))))
-            tmp_aligns.append(float("nan"))
-
-            # 1.5 保存原始 delta 以便评测（更直观地用 base+delta）
-            deltas.append(upd)
-            upd_types.append(updtype)
+            tmp_aligns.append(float("nan"))  # 等聚合方向出来后再算
 
         # ---------- 2) committee ----------
         try:
@@ -239,34 +237,49 @@ class Aggregator:
 
         # ---------- 3) eval reconstructed models (base + delta) ----------
   
+        # if realized_states:
+        #     # 按 update_type 分组评测：delta -> base+delta，state -> 直接评测
+        #     eval_accs = [float("nan")] * len(deltas)
+        #     delta_idx = [i for i, t in enumerate(upd_types) if t == "delta"]
+        #     state_idx = [i for i, t in enumerate(upd_types) if t != "delta"]
+        #     if delta_idx:
+        #         delta_updates = [deltas[i] for i in delta_idx]
+        #         delta_accs = evaluate_reconstructed_batch(
+        #             base_state=base_sd,
+        #             deltas=delta_updates,
+        #             dataset=self.dataset_name,
+        #             model_hint=self.model_name,
+        #             max_workers=4,
+        #         )
+        #         for i, acc in zip(delta_idx, delta_accs):
+        #             eval_accs[i] = acc
+        #     if state_idx:
+        #         state_updates = [deltas[i] for i in state_idx]
+        #         state_accs = evaluate_many_state_dicts(
+        #             state_updates,
+        #             dataset=self.dataset_name,
+        #             model_hint=self.model_name,
+        #             max_workers=4,
+        #         )
+        #         for i, acc in zip(state_idx, state_accs):
+        #             eval_accs[i] = acc
+        # else:
+        #     # 无提交：直接维持 base
+        #     agg_sd = base_sd
+        #     new_cid = self.ipfs.save(agg_sd)
+        #     self.contract.set_global_model(r + 1, new_cid)
+        #     self.contract.settle_round(r)
+        #     return new_cid, {}, {}, {}
+
+        # 3) 评测重构后的本地模型
         if realized_states:
-            # 按 update_type 分组评测：delta -> base+delta，state -> 直接评测
-            eval_accs = [float("nan")] * len(deltas)
-            delta_idx = [i for i, t in enumerate(upd_types) if t == "delta"]
-            state_idx = [i for i, t in enumerate(upd_types) if t != "delta"]
-            if delta_idx:
-                delta_updates = [deltas[i] for i in delta_idx]
-                delta_accs = evaluate_reconstructed_batch(
-                    base_state=base_sd,
-                    deltas=delta_updates,
-                    dataset=self.dataset_name,
-                    model_hint=self.model_name,
-                    max_workers=4,
-                )
-                for i, acc in zip(delta_idx, delta_accs):
-                    eval_accs[i] = acc
-            if state_idx:
-                state_updates = [deltas[i] for i in state_idx]
-                state_accs = evaluate_many_state_dicts(
-                    state_updates,
-                    dataset=self.dataset_name,
-                    model_hint=self.model_name,
-                    max_workers=4,
-                )
-                for i, acc in zip(state_idx, state_accs):
-                    eval_accs[i] = acc
+            eval_accs = evaluate_many_state_dicts(
+                realized_states,
+                dataset=self.dataset_name,
+                model_hint=self.model_name,
+                max_workers=4,
+            )
         else:
-            # 无提交：直接维持 base
             agg_sd = base_sd
             new_cid = self.ipfs.save(agg_sd)
             self.contract.set_global_model(r + 1, new_cid)

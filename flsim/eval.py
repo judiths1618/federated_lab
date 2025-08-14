@@ -7,6 +7,19 @@ import concurrent.futures
 
 from .models import LinearMNIST
 
+@torch.no_grad()
+def evaluate_global(cidr: str, ipfs) -> float:
+    test_set = MNIST(root="./data", train=False, download=True, transform=T.ToTensor())
+    loader = DataLoader(test_set, batch_size=256, shuffle=False)
+    model = LinearMNIST()
+    model.load_state_dict(ipfs.load(cidr))
+    model.eval()
+    correct, total = 0, 0
+    for xb, yb in loader:
+        out = model(xb); _, pred = out.max(1)
+        total += yb.size(0); correct += int((pred == yb).sum())
+    return correct/max(1,total)
+
 
 class SimpleCIFAR10(torch.nn.Module):
     def __init__(self, num_classes: int = 10):
@@ -45,6 +58,7 @@ def _make_model(model_hint: Optional[str], dataset_kind: str):
         if 'linear' in h or 'mnist' in h:
             return LinearMNIST()
     return LinearMNIST() if dataset_kind == 'mnist' else SimpleCIFAR10()
+    # return model_hint
 
 
 def _apply_update(base_state: dict, update: dict, update_type: str):
@@ -63,7 +77,36 @@ def _apply_update(base_state: dict, update: dict, update_type: str):
         return realized
     return update
 
+def reconstruct_state(base_state: dict, update_obj: dict, update_type: str = "delta") -> dict:
+    """
+    按客户端逻辑重构全量本地模型：
+      - update_type == 'delta': realized = base + delta
+      - update_type == 'state': realized = update_obj
+    对缺键/新增键做了容错处理。
+    """
+    ut = (update_type or "delta").lower()
+    if ut == "state":
+        return update_obj
 
+    # 默认 delta：realized = base + delta
+    realized = {}
+    # 先把 base 的键都放入
+    for k, bv in base_state.items():
+        dv = update_obj.get(k, None)
+        if torch.is_tensor(bv) and torch.is_tensor(dv) and bv.shape == dv.shape:
+            realized[k] = bv + dv
+        elif torch.is_tensor(bv) and dv is None:
+            realized[k] = bv.clone()
+        else:
+            # 非 tensor 或 shape 不匹配，保留 base
+            realized[k] = bv
+
+    # 处理 delta 里“新增的键”
+    for k, dv in update_obj.items():
+        if k not in realized:
+            realized[k] = dv if torch.is_tensor(dv) else dv
+
+    return realized
 # ---------------- public APIs ----------------
 
 @torch.no_grad()
