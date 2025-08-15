@@ -5,7 +5,7 @@ from torchvision.datasets import MNIST, CIFAR10
 from typing import Optional, Sequence, List
 import concurrent.futures
 
-from .models import LinearMNIST
+from ..models import LinearMNIST
 
 @torch.no_grad()
 def evaluate_global(cidr: str, ipfs) -> float:
@@ -134,12 +134,16 @@ def evaluate_state_dict(
     device: str = 'cpu',
     base_state: Optional[dict] = None,
     update_type: str = 'delta',   # 'delta' | 'state'
+    loader: Optional[DataLoader] = None,
 ) -> float:
     """
     Evaluate a single model state or delta.
     If base_state is provided and update_type == 'delta', reconstruct realized = base + delta before evaluating.
     """
-    loader, kind = _make_dataset(dataset)
+    if loader is None:
+        loader, kind = _make_dataset(dataset)
+    else:
+        kind = dataset
     model = _make_model(model_hint, kind).to(device)
 
     realized = _apply_update(base_state, state_dict, update_type) if (base_state is not None) else state_dict
@@ -166,12 +170,14 @@ def evaluate_many_state_dicts(
     max_workers: int = 4,
     base_state: Optional[dict] = None,
     update_type: str = 'state',   # 'delta' | 'state'
+    loaders: Optional[Sequence[DataLoader]] = None,
 ) -> List[float]:
     """
     Parallel evaluation of many updates.
     If base_state is given and update_type == 'delta', each update is realized as (base + delta) before evaluation.
     """
-    def _one(sd):
+    def _one(pair):
+        sd, loader = pair
         try:
             return float(
                 evaluate_state_dict(
@@ -181,13 +187,19 @@ def evaluate_many_state_dicts(
                     device=device,
                     base_state=base_state,
                     update_type=update_type,
+                    loader=loader,
                 )
             )
         except Exception:
             return float('nan')
 
+    if loaders is None:
+        pairs = [(sd, None) for sd in state_dicts]
+    else:
+        pairs = list(zip(state_dicts, loaders))
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-        return list(ex.map(_one, state_dicts))
+        return list(ex.map(_one, pairs))
 
 
 # -------- new: explicit helpers for reconstructed (base + delta) evaluation --------

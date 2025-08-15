@@ -5,6 +5,7 @@ from typing import Dict, List, Optional
 
 import numpy as np
 import torch
+from torch.utils.data import DataLoader
 
 from ..evaluation import evaluate_many_state_dicts, reconstruct_state
 
@@ -40,6 +41,7 @@ class Aggregator:
         strategy_name: str = "fedavg",
         dataset_name: str = "mnist",
         model_name: Optional[str] = None,
+        eval_loaders: Optional[List[DataLoader]] = None,
     ) -> None:
         self.ipfs = ipfs
         self.contract = contract
@@ -54,6 +56,7 @@ class Aggregator:
         self.hist_decay_factor = hist_decay_factor
         self.dataset_name = dataset_name
         self.model_name = model_name
+        self.eval_loaders = eval_loaders
 
         os.makedirs(os.path.join(self.save_dir, "models"), exist_ok=True)
         os.makedirs(os.path.join(self.save_dir, "updates"), exist_ok=True)
@@ -244,6 +247,7 @@ class Aggregator:
                 dataset=self.dataset_name,
                 model_hint=self.model_name,
                 max_workers=4,
+                loaders=self.eval_loaders,
             )
         else:
             agg_sd = base_sd

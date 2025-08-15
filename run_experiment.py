@@ -9,6 +9,8 @@ from flsim.runner import FLRunner
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exp", type=str, default="baseline", help="Experiment name (folder under runs)")
+    ap.add_argument("--dataset", type=str, default=None, help="Dataset name (e.g., mnist)")
+    ap.add_argument("--model", type=str, default=None, help="Model name (e.g., LinearMNIST)")
     ap.add_argument("--rounds", type=int, default=None)
     ap.add_argument("--nodes", type=int, default=None)
     ap.add_argument("--target-acc", type=float, default=None)
