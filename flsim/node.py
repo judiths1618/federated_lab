@@ -11,20 +11,31 @@ from .attacks import AttackBehavior, make_behavior
 from .evaluation import evaluate_state_dict, evaluate_reconstructed_single  # if not already imported
 
 
-def test(net, testloader, device):
-    """Validate the model on the test set."""
+def test(net, testloader, device, img_key: str = "img", label_key: str = "label"):
+    """Validate the model on the test set and return average loss and accuracy.
+
+    The dataloader may yield batches as dictionaries with arbitrary keys
+    (e.g. "image"/"label" or "img"/"label"). To remain agnostic to the
+    underlying dataset, the keys are parameterised and default to the common
+    "img"/"label" pair.
+    """
     net.to(device)
     criterion = torch.nn.CrossEntropyLoss()
-    correct, loss = 0, 0.0
+    total, correct, loss_sum = 0, 0, 0.0
     with torch.no_grad():
         for batch in testloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
+            images, labels = batch[img_key], batch[label_key]
+            if isinstance(images, list):
+                images = torch.stack(images)
+            if isinstance(labels, list):
+                labels = torch.tensor(labels)
+            images, labels = images.to(device), labels.to(device)
             outputs = net(images)
-            loss += criterion(outputs, labels).item()
+            loss_sum += criterion(outputs, labels).item() * labels.size(0)
             correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
-    accuracy = correct / len(testloader.dataset)
-    loss = loss / len(testloader)
+            total += labels.size(0)
+    accuracy = correct / total if total else 0.0
+    loss = loss_sum / total if total else 0.0
     return loss, accuracy
 
 
@@ -98,7 +109,7 @@ class LocalNode:
                 opt.step()
 
         # evaluate on held-out test set
-        test_loss, test_acc = test(model, self.testloader, "cpu")
+        test_loss, test_acc = test(model, self.testloader, "cpu", self.img_key, self.label_key)
 
         updated_sd = model.state_dict()
 
