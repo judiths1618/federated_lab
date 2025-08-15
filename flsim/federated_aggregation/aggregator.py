@@ -6,7 +6,7 @@ from typing import Dict, List, Optional
 import numpy as np
 import torch
 
-from ..eval import evaluate_many_state_dicts, reconstruct_state
+from ..evaluation import evaluate_many_state_dicts, reconstruct_state
 
 class Aggregator:
     """
@@ -59,7 +59,7 @@ class Aggregator:
         os.makedirs(os.path.join(self.save_dir, "updates"), exist_ok=True)
 
         self.strategy_name = strategy_name
-        mod = importlib.import_module(f"flsim.aggregation.{strategy_name}")
+        mod = importlib.import_module(f"flsim.federated_aggregation.{strategy_name}")
         self.strategy = getattr(mod, "Strategy")()
 
         # Contribution weights

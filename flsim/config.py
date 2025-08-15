@@ -63,7 +63,7 @@ class ModelCfg:
 
 @dataclass
 class AggregationCfg:
-    strategy: str = "fedavg"
+    strategy: str = "FedAvg"
 
 @dataclass
 class Cfg:
