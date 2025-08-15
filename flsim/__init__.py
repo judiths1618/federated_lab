@@ -2,7 +2,7 @@ __all__ = [
     "config",
     "storage",
     "models",
-    "partition",
+    "data_preparation",
     "node",
     "aggregator",
     "federated_aggregation",
