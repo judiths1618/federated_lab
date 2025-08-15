@@ -9,7 +9,7 @@ __all__ = [
     "evaluation",
     "incentive_strategy",
     "contracts",
-    "attacks",
+    "attack",
     "runner",
     "malicious_detection",
 ]
