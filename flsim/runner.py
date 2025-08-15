@@ -7,9 +7,10 @@ import random
 from .config import Cfg
 from .partition import make_flower_partitions
 from .node import LocalNode, NodeConfig
-from .storage import IPFSSim, ContractSim
-from flsim.aggregation.aggregator import Aggregator
-from .eval import evaluate_global
+from .storage import IPFSSim
+from .contracts import OurContract
+from flsim.federated_aggregation.aggregator import Aggregator
+from .evaluation import evaluate_global
 from .attacks import make_behavior
 
 class FLRunner:
@@ -17,7 +18,7 @@ class FLRunner:
         self.cfg = cfg
         for p in [cfg.paths.run_dir, cfg.paths.models_dir, cfg.paths.updates_dir, cfg.paths.sim_dir]:
             Path(p).mkdir(parents=True, exist_ok=True)
-        self.ipfs = IPFSSim(); self.contract = ContractSim()
+        self.ipfs = IPFSSim(); self.contract = OurContract()
 
     def _init_nodes(self, subsets, key_pairs) -> List[LocalNode]:
         nodes = []

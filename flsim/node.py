@@ -8,7 +8,7 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from .models import LinearMNIST
 from .attacks import AttackBehavior, make_behavior
-from .eval import evaluate_state_dict, evaluate_reconstructed_single  # if not already imported
+from .evaluation import evaluate_state_dict, evaluate_reconstructed_single  # if not already imported
 
 def test(net, testloader, device):
     """Validate the model on the test set."""
