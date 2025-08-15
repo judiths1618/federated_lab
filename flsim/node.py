@@ -7,7 +7,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from .models import LinearMNIST
-from .attacks import AttackBehavior, make_behavior
+from .attack import AttackBehavior, make_behavior
 from .evaluation import evaluate_state_dict, evaluate_reconstructed_single  # if not already imported
 
 

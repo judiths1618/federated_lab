@@ -12,7 +12,7 @@ from .storage import IPFSSim
 from .contracts import OurContract
 from flsim.federated_aggregation.aggregator import Aggregator
 from .evaluation import evaluate_global
-from .attacks import make_behavior
+from .attack import make_behavior
 
 
 class FLRunner:
