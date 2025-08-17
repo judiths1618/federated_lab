@@ -1,1 +1,0 @@
-round,global_acc,manifest_cid,node_id,samples,loss,acc,claimed_acc,eval_acc,acc_diff,update_type,model_update_cid,metrics_cid,contrib_score,reward,balance,stake_penalty,stake,reputation,malicious_detected,committee,is_malicious,strategy
