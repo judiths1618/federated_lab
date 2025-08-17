@@ -1,3 +1,25 @@
+# Ignore Python cache
 __pycache__/
 *.pyc
+
+# Ignore node modules
+node_modules/
+
+# Ignore environment files
+.env
+
+# Ignore build outputs
+dist/
+build/
+
+# Ignore OS files
 .DS_Store
+Thumbs.db
+
+# Ignore the datset files
+data/
+
+# Ignore the simulation results
+runs/
+visualization/
+
