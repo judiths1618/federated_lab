@@ -66,7 +66,8 @@ class Aggregator:
         self.strategy = getattr(mod, "Strategy")()
 
         # Contribution weights
-        self.W_ALIGN, self.W_ACC, self.W_LOSS, self.W_NORM = 0.4, 0.3, 0.2, 0.1
+        # self.W_ALIGN, self.W_ACC, self.W_LOSS, self.W_NORM = 0.4, 0.3, 0.2, 0.1
+        self.W_ALIGN, self.W_ACC, self.W_LOSS, self.W_NORM = 0.4, 0.3, 0.3
 
     # ----------------- helpers -----------------
     def _apply_update(self, base, update, update_type):
@@ -280,9 +281,11 @@ class Aggregator:
         norm_n    = self._robust_minmax(np.array(tmp_norms))
         align_n   = self._robust_minmax(align_01)
         acc_n     = self._robust_minmax(np.array(tmp_accs))
-        loss_01   = self._robust_minmax(np.array(tmp_losses))
-        loss_good = 1.0 - loss_01
-        scores = self.W_ALIGN * align_n + self.W_ACC * acc_n + self.W_LOSS * loss_good + self.W_NORM * norm_n
+        # loss_01   = self._robust_minmax(np.array(tmp_losses))
+        # loss_good = 1.0 - loss_01
+        # scores = self.W_ALIGN * align_n + self.W_ACC * acc_n + self.W_LOSS * loss_good + self.W_NORM * norm_n
+        
+        scores = self.W_ALIGN * align_n + self.W_ACC * acc_n + self.W_NORM * norm_n
 
         # ---------- 7) commit & reward ----------
         contrib_map: Dict[int, float] = {}

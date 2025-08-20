@@ -94,9 +94,9 @@ class FLRunner:
                 reward_rate=self.cfg.reward.reward_rate,
                 penalize_negative=self.cfg.reward.penalize_negative,
                 committee_bonus=getattr(self.cfg.reward, "committee_bonus", 0.10),
-                mal_eval_diff_thresh=getattr(
-                    self.cfg.reward, "mal_eval_diff_thresh", 0.15
-                ),
+                # mal_eval_diff_thresh=getattr(
+                #     self.cfg.reward, "mal_eval_diff_thresh", 0.15
+                # ),
             )
         except Exception:
             pass
