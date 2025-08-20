@@ -52,7 +52,7 @@ class LocalNode:
         self,
         cfg: NodeConfig,
         train_ds,
-        test_ds,
+        val_ds,
         keys: Tuple[str, str],
         ipfs,
         contract,
@@ -68,7 +68,7 @@ class LocalNode:
         self.contract = contract
         self.img_key, self.label_key = keys
         self.loader = DataLoader(train_ds, batch_size=cfg.batch_size, shuffle=True)
-        self.testloader = DataLoader(test_ds, batch_size=cfg.batch_size, shuffle=False)
+        self.valloader = DataLoader(val_ds, batch_size=cfg.batch_size, shuffle=False)
         self.num_samples = len(train_ds)
         self.upload_delta = upload_delta
         self.save_updates = save_updates
@@ -108,8 +108,10 @@ class LocalNode:
                 loss.backward()
                 opt.step()
 
-        # evaluate on held-out test set
-        test_loss, test_acc = test(model, self.testloader, "cpu", self.img_key, self.label_key)
+        # evaluate on held-out validation set
+        val_loss, val_acc = test(
+            model, self.valloader, "cpu", self.img_key, self.label_key
+        )
 
         updated_sd = model.state_dict()
 
@@ -137,11 +139,11 @@ class LocalNode:
             )
 
         self.last_delta_norm = float(delta_norm)
-        self.last_loss = float(test_loss)
-        self.last_acc = float(test_acc)
+        self.last_loss = float(val_loss)
+        self.last_acc = float(val_acc)
         self.participation += 1
 
-        rep_loss, rep_acc = self.behavior.mutate_metrics(test_loss, test_acc)
+        rep_loss, rep_acc = self.behavior.mutate_metrics(val_loss, val_acc)
 
         model_cid = self.ipfs.save(update_obj)
         metrics_cid = self.ipfs.save(
