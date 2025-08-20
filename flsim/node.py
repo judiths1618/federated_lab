@@ -8,7 +8,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from .models import LinearMNIST
 from .attacks import AttackBehavior, make_behavior
-from .evaluation import evaluate_state_dict, evaluate_reconstructed_single  # if not already imported
 
 
 def test(net, testloader, device, img_key: str = "img", label_key: str = "label"):
@@ -20,6 +19,8 @@ def test(net, testloader, device, img_key: str = "img", label_key: str = "label"
     "img"/"label" pair.
     """
     net.to(device)
+    was_training = net.training
+    net.eval()
     criterion = torch.nn.CrossEntropyLoss()
     total, correct, loss_sum = 0, 0, 0.0
     with torch.no_grad():
@@ -36,6 +37,8 @@ def test(net, testloader, device, img_key: str = "img", label_key: str = "label"
             total += labels.size(0)
     accuracy = correct / total if total else 0.0
     loss = loss_sum / total if total else 0.0
+    if was_training:
+        net.train()
     return loss, accuracy
 
 

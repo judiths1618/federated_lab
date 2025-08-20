@@ -125,9 +125,6 @@ class FLRunner:
             stake_weight=self.cfg.reward.stake_weight,
             committee_size=self.cfg.reward.committee_size,
             hist_decay_factor=self.cfg.reward.hist_decay,
-            eval_loaders=[
-                DataLoader(ds, batch_size=256, shuffle=False) for ds in val_sets
-            ],
         )
 
         # 4) 主循环
