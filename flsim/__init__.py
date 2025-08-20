@@ -12,4 +12,5 @@ __all__ = [
     "attacks",
     "runner",
     "malicious_detection",
+    "malicious_detection_and_defense",
 ]
