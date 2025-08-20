@@ -11,15 +11,15 @@ from .attacks import AttackBehavior, make_behavior
 from .evaluation import evaluate_state_dict, evaluate_reconstructed_single   # if not already imported
 
 
-def test(net, testloader, device):
+def test(net, testloader, device, img_key, label_key="label"):
     """Validate the model on the test set."""
     net.to(device)
     criterion = torch.nn.CrossEntropyLoss()
     correct, loss = 0, 0.0
     with torch.no_grad():
         for batch in testloader:
-            images = batch["img"].to(device)
-            labels = batch["label"].to(device)
+            images = batch[img_key].to(device)
+            labels = batch[label_key].to(device)
             outputs = net(images)
             loss += criterion(outputs, labels).item()
             correct += (torch.max(outputs.data, 1)[1] == labels).sum().item()
@@ -98,7 +98,7 @@ class LocalNode:
                 opt.step()
 
         # evaluate on held-out test set
-        test_loss, test_acc = test(model, self.testloader, "cpu")
+        test_loss, test_acc = test(model, self.testloader, "cpu", self.img_key, self.label_key)
 
         updated_sd = model.state_dict()
 
