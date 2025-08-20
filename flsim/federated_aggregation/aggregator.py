@@ -67,7 +67,7 @@ class Aggregator:
 
         # Contribution weights
         # self.W_ALIGN, self.W_ACC, self.W_LOSS, self.W_NORM = 0.4, 0.3, 0.2, 0.1
-        self.W_ALIGN, self.W_ACC, self.W_LOSS, self.W_NORM = 0.4, 0.3, 0.3
+        self.W_ALIGN, self.W_ACC, self.W_NORM = 0.4, 0.3, 0.3
 
     # ----------------- helpers -----------------
     def _apply_update(self, base, update, update_type):
