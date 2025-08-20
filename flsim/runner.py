@@ -26,7 +26,7 @@ class FLRunner:
         ]:
             Path(p).mkdir(parents=True, exist_ok=True)
         self.ipfs = IPFSSim()
-        self.contract = OurContract()
+        self.contract = OurContract(self.ipfs)
 
     def _init_nodes(self, train_sets, test_sets, key_pairs) -> List[LocalNode]:
         nodes = []
