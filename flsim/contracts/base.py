@@ -65,8 +65,8 @@ class IncentiveParams:
     detect_score_thresh: float = 0.05
     mal_eval_diff_thresh: float = 0.15
     # optional but useful knobs
-    committee_size: int = 10
-    committee_cooldown: int = 1  # rounds a selected node must wait before rejoining
+    committee_size: int = 5  # committee size per round
+    committee_cooldown: int = 3  # rounds a selected node must wait before rejoining
     # —— 误判保护 & 检测（如果你已加过可以忽略）——
     mal_min_gap: float = 0.05
     mal_allowed_base: float = 0.05
@@ -113,26 +113,32 @@ class BaseContract:
     # ---------------- basic storage ----------------
 
     def submit_model(self, round_idx: int, node_id: int, model_cid: str, metrics_cid: str, update_type: str):
+        '''local node submits model and metrics for round `round_idx`'''
         self.records.setdefault(round_idx, {})[node_id] = (model_cid, metrics_cid, update_type)
 
     def get_round_submissions(self, round_idx: int):
+        '''aggregation retrieves all submissions for round `round_idx`'''
         return self.records.get(round_idx, {})
 
     def set_global_model(self, round_idx: int, cid: str):
+        '''Set the global model CID for round `round_idx`'''
         self.global_models[round_idx] = cid
 
     def get_latest_global(self):
+        '''Get the latest global model CID and round index'''
         if not self.global_models:
             return (-1, "")
         r = max(self.global_models.keys())
         return (r, self.global_models[r])
 
     def set_round_manifest(self, round_idx: int, cid: str):
+        '''Set the manifest CID for round `round_idx`. This is a record of all artifacts.'''
         self.manifests[round_idx] = cid
 
     # ---------------- economics helpers ----------------
 
     def set_contribution(self, round_idx: int, node_id: int, score: float):
+        '''Set the contribution score for node `node_id` in round `round_idx`'''
         self.contribs.setdefault(int(round_idx), {})[int(node_id)] = float(score)
 
     def add_reward(self, round_idx: int, node_id: int, amount: float):
@@ -145,16 +151,19 @@ class BaseContract:
         self.rewards[r][n] = self.rewards[r].get(n, 0.0) + float(amount)
 
     def get_balance(self, node_id: int) -> float:
+        '''Get the current balance for node `node_id`'''
         return float(self.balances.get(int(node_id), 0.0))
 
     # ---------------- config / registry ----------------
 
     def set_incentive_params(self, **kwargs):
+        '''Set or update incentive parameters using keyword arguments.'''
         for k, v in kwargs.items():
             if hasattr(self.params, k):
                 setattr(self.params, k, v)
 
     def register_node(self, node_id: int, stake: float, reputation: float):
+        '''Register a new node with its initial stake and reputation, starting from participation count 0, zero contribution history.'''
         self.nodes[int(node_id)] = {
             "stake": float(stake),
             "reputation": float(reputation),
@@ -164,7 +173,22 @@ class BaseContract:
         }
 
     def update_reputation(self, node_id: int, contribution: float, *, current_round: int) -> float:
-        """Update a node's reputation using a robust decay and stability model."""
+        """
+            Update a node's reputation using a robust decay and stability model.
+            input:
+            - node_id: int, the ID of the node to update
+            - contribution: float, the contribution score for this round
+            - current_round: int, the current round index
+
+            Returns the updated reputation value.
+            If the node does not exist, returns 0.0.
+            The reputation update is based on:
+            - Dynamic decay factor based on participation count
+            - Contribution quality via sigmoid normalization
+            - Stability over recent contribution history
+            - Reputation cap based on round index (early vs late)
+            - Uses params.X_c and params.X_s for contribution and stability weights.
+        """
         nid = int(node_id)
         if nid not in self.nodes:
             return 0.0
