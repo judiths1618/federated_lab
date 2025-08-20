@@ -28,7 +28,7 @@ class FLRunner:
         self.ipfs = IPFSSim()
         self.contract = OurContract()
 
-    def _init_nodes(self, train_sets, test_sets, key_pairs) -> List[LocalNode]:
+    def _init_nodes(self, train_sets, val_sets, key_pairs) -> List[LocalNode]:
         nodes = []
         N = self.cfg.train.nodes
         mN = int(round(self.cfg.attack.malicious_frac * N))
@@ -52,7 +52,7 @@ class FLRunner:
                         self.cfg.train.epochs,
                     ),
                     train_sets[i],
-                    test_sets[i],
+                    val_sets[i],
                     key_pairs[i],
                     self.ipfs,
                     self.contract,
@@ -74,7 +74,7 @@ class FLRunner:
         self.contract.set_global_model(0, g0)
 
         # 1) 数据划分 & 节点初始化
-        train_sets, test_sets, key_pairs = make_flower_partitions(
+        train_sets, val_sets, key_pairs = make_flower_partitions(
             num_nodes=self.cfg.train.nodes,
             method=self.cfg.data.partitioner,
             alpha=self.cfg.data.alpha,
@@ -82,7 +82,7 @@ class FLRunner:
             shards_per_node=self.cfg.data.shards_per_node,
             samples_per_client=self.cfg.data.samples_per_client,
         )
-        nodes = self._init_nodes(train_sets, test_sets, key_pairs)
+        nodes = self._init_nodes(train_sets, val_sets, key_pairs)
 
         # [可选] 2) 合约参数注入 + 注册节点（如已 elsewhere 注入，可删除此块）
         try:
@@ -126,7 +126,7 @@ class FLRunner:
             committee_size=self.cfg.reward.committee_size,
             hist_decay_factor=self.cfg.reward.hist_decay,
             eval_loaders=[
-                DataLoader(ds, batch_size=256, shuffle=False) for ds in test_sets
+                DataLoader(ds, batch_size=256, shuffle=False) for ds in val_sets
             ],
         )
 
