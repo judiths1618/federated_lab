@@ -7,22 +7,32 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
+from ..incentive_strategy import ReputationIncentives, ReputationCfg
 from ..evaluation import evaluate_many_state_dicts, reconstruct_state
+from ..federated_aggregation import flame
 
 class Aggregator:
     """
-    FedAvg aggregator + contribution scoring (align/acc/loss/norm with robust min-max).
+    set committee + flame + FedAvg aggregator + contribution scoring (align/acc/loss/norm with robust min-max).
 
+    1. calculate the contribution for each node based on the alignment, accuracy, loss, and norm of their updates.
+    2. set committee based on the sampling strategy (e.g., reputation-based).
+    3. malicious detection using FLAME.
+    4. apply the reward and penalty logic based on the contributions, committee status, and behaviours for begnin and malicious nodes.
+    5. aggregate the updates using FLAME
+    6. save the aggregated model and update the global state.
+    
+    Contribution scoring:
     Contribution for round r is computed *after* aggregation using:
       score = 0.4 * align + 0.3 * acc + 0.2 * (1 - norm(loss)) + 0.1 * norm(update_norm)
     where each component is normalized within the round using an IQR-based min-max.
     - align: cosine similarity between each client's delta and aggregation direction
              (new_global - prev_global), scaled from [-1,1] -> [0,1], then robust min-max.
-    - acc:   client's reported train accuracy for the round, robust min-max.
-    - loss:  lower is better, so we robust-minmax(loss) and then take (1 - loss_norm).
+    - acc:   client's reported train accuracy for the round, robust min-max. claimed by the client.
+    # - loss:  lower is better, so we robust-minmax(loss) and then take (1 - loss_norm).
     - norm:  L2 of the client's realized delta (realized - base), robust min-max.
 
-    Rewards are then computed based on your previously specified economic logic.
+    Rewards, penalties, and reputations are then computed based on your previously specified economic logic.
     """
 
     def __init__(
@@ -75,69 +85,69 @@ class Aggregator:
             return {k: base[k] + update[k] for k in base.keys()}
         return update
 
-    @staticmethod
-    def _sigmoid(x: float) -> float:
-        return 1.0 / (1.0 + math.exp(-x))
+    # @staticmethod
+    # def _sigmoid(x: float) -> float:
+    #     return 1.0 / (1.0 + math.exp(-x))
 
-    @staticmethod
-    def _jain_fairness(vals: List[float]) -> float:
-        if not vals:
-            return 0.0
-        s = float(sum(vals))
-        if s == 0:
-            return 0.0
-        s2 = float(sum(v * v for v in vals)) + 1e-8
-        n = float(len(vals))
-        jf = (s * s) / (n * s2)
-        mean = s / n
-        # light coupling to mean reputation to avoid degenerate distributions
-        return jf * (1.0 / (1.0 + math.exp(-mean / 10.0)))
+    # @staticmethod
+    # def _jain_fairness(vals: List[float]) -> float:
+    #     if not vals:
+    #         return 0.0
+    #     s = float(sum(vals))
+    #     if s == 0:
+    #         return 0.0
+    #     s2 = float(sum(v * v for v in vals)) + 1e-8
+    #     n = float(len(vals))
+    #     jf = (s * s) / (n * s2)
+    #     mean = s / n
+    #     # light coupling to mean reputation to avoid degenerate distributions
+    #     return jf * (1.0 / (1.0 + math.exp(-mean / 10.0)))
 
-    def _calc_committee(self) -> List[int]:
-        N = len(self.nodes)
-        K = min(self.committee_size, N)
-        sel = sorted(self.nodes, key=lambda n: getattr(n, "reputation", 10.0), reverse=True)[:K]
-        return [n.cfg.node_id for n in sel]
+    # def _calc_committee(self) -> List[int]:
+    #     N = len(self.nodes)
+    #     K = min(self.committee_size, N)
+    #     sel = sorted(self.nodes, key=lambda n: getattr(n, "reputation", 10.0), reverse=True)[:K]
+    #     return [n.cfg.node_id for n in sel]
 
-    def _calculate_reward(self, node, avg_rep: float, in_committee: bool) -> float:
-        """Compute the reward for ``node`` based on stake, history and committee status."""
+    # def _calculate_reward(self, node, avg_rep: float, in_committee: bool) -> float:
+    #     """Compute the reward for ``node`` based on stake, history and committee status."""
 
-        stakes = [getattr(n, "stake", 10.0) for n in self.nodes]
-        avg_stake = sum(stakes) / max(1, len(stakes))
-        effective_stake = min(getattr(node, "stake", 10.0), 3.0 * avg_stake)
+    #     stakes = [getattr(n, "stake", 10.0) for n in self.nodes]
+    #     avg_stake = sum(stakes) / max(1, len(stakes))
+    #     effective_stake = min(getattr(node, "stake", 10.0), 3.0 * avg_stake)
 
-        hist_contrib = self._historical_contribution(node)
-        print(f"Node {node.cfg.node_id} history contribution: {hist_contrib:.4f}")
+    #     hist_contrib = self._historical_contribution(node)
+    #     print(f"Node {node.cfg.node_id} history contribution: {hist_contrib:.4f}")
 
-        reputations = [getattr(n, "reputation", 10.0) for n in self.nodes]
-        diversity_bonus = self._jain_fairness(reputations)
+    #     reputations = [getattr(n, "reputation", 10.0) for n in self.nodes]
+    #     diversity_bonus = self._jain_fairness(reputations)
 
-        node_rep = getattr(node, "reputation", 10.0)
-        alpha = self._sigmoid((avg_rep - node_rep) / 50.0) * self.stake_weight
-        beta = 1.0 - alpha
-        committee_bonus = 20.0 * diversity_bonus if in_committee else 0.0
+    #     node_rep = getattr(node, "reputation", 10.0)
+    #     alpha = self._sigmoid((avg_rep - node_rep) / 50.0) * self.stake_weight
+    #     beta = 1.0 - alpha
+    #     committee_bonus = 20.0 * diversity_bonus if in_committee else 0.0
 
-        total_contrib = sum((n.contrib_history[-1] if getattr(n, "contrib_history", []) else 0.0) for n in self.nodes)
-        total_contrib = total_contrib if abs(total_contrib) > 1e-8 else 1.0
-        total_stake = sum(stakes) or 1.0
+    #     total_contrib = sum((n.contrib_history[-1] if getattr(n, "contrib_history", []) else 0.0) for n in self.nodes)
+    #     total_contrib = total_contrib if abs(total_contrib) > 1e-8 else 1.0
+    #     total_stake = sum(stakes) or 1.0
 
-        reward = (
-            (alpha * self.base_reward * (effective_stake / total_stake)
-             + beta * self.base_reward * (hist_contrib / total_contrib))
-            * diversity_bonus
-            + committee_bonus
-        )
-        print(f"Node {node.cfg.node_id} reward before clipping: {reward:.4f}")
-        reward *= self.reward_rate
-        if self.penalize_negative:
-            reward = max(0.0, reward)
-        return reward
+    #     reward = (
+    #         (alpha * self.base_reward * (effective_stake / total_stake)
+    #          + beta * self.base_reward * (hist_contrib / total_contrib))
+    #         * diversity_bonus
+    #         + committee_bonus
+    #     )
+    #     print(f"Node {node.cfg.node_id} reward before clipping: {reward:.4f}")
+    #     reward *= self.reward_rate
+    #     if self.penalize_negative:
+    #         reward = max(0.0, reward)
+    #     return reward
 
-    def _historical_contribution(self, node, window: int = 5) -> float:
-        """Return decayed historical contribution for ``node`` over last ``window`` rounds."""
-        hist = getattr(node, "contrib_history", []) or []
-        recent = hist[-window:]
-        return sum(float(c) * (self.hist_decay_factor ** t) for t, c in enumerate(reversed(recent)))
+    # def _historical_contribution(self, node, window: int = 5) -> float:
+    #     """Return decayed historical contribution for ``node`` over last ``window`` rounds."""
+    #     hist = getattr(node, "contrib_history", []) or []
+    #     recent = hist[-window:]
+    #     return sum(float(c) * (self.hist_decay_factor ** t) for t, c in enumerate(reversed(recent)))
 
     @staticmethod
     def _flatten_sd(sd: Dict[str, torch.Tensor]) -> torch.Tensor:
@@ -149,40 +159,40 @@ class Aggregator:
             return torch.zeros(1)
         return torch.cat(vecs, dim=0)
 
-    @staticmethod
-    def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
-        if a.numel() == 0 or b.numel() == 0:
-            return float("nan")
-        na = torch.linalg.norm(a)
-        nb = torch.linalg.norm(b)
-        if float(na) == 0.0 or float(nb) == 0.0:
-            return float("nan")
-        return float((a @ b) / (na * nb))
+    # @staticmethod
+    # def _cosine(a: torch.Tensor, b: torch.Tensor) -> float:
+    #     if a.numel() == 0 or b.numel() == 0:
+    #         return float("nan")
+    #     na = torch.linalg.norm(a)
+    #     nb = torch.linalg.norm(b)
+    #     if float(na) == 0.0 or float(nb) == 0.0:
+    #         return float("nan")
+    #     return float((a @ b) / (na * nb))
 
-    @staticmethod
-    def _robust_minmax(x: np.ndarray) -> np.ndarray:
-        x = x.astype(float)
-        if x.size == 0:
-            return x
-        q1, q3 = np.nanpercentile(x, [25, 75])
-        if not np.isfinite(q1) or not np.isfinite(q3) or q3 <= q1:
-            xmin, xmax = np.nanmin(x), np.nanmax(x)
-            if not np.isfinite(xmin) or xmax <= xmin:
-                return np.zeros_like(x)
-            return np.clip((x - xmin) / (xmax - xmin), 0.0, 1.0)
-        return np.clip((x - q1) / (q3 - q1), 0.0, 1.0)
+    # @staticmethod
+    # def _robust_minmax(x: np.ndarray) -> np.ndarray:
+    #     x = x.astype(float)
+    #     if x.size == 0:
+    #         return x
+    #     q1, q3 = np.nanpercentile(x, [25, 75])
+    #     if not np.isfinite(q1) or not np.isfinite(q3) or q3 <= q1:
+    #         xmin, xmax = np.nanmin(x), np.nanmax(x)
+    #         if not np.isfinite(xmin) or xmax <= xmin:
+    #             return np.zeros_like(x)
+    #         return np.clip((x - xmin) / (xmax - xmin), 0.0, 1.0)
+    #     return np.clip((x - q1) / (q3 - q1), 0.0, 1.0)
 
-    @staticmethod
-    def fedavg_weighted(states: List[Dict[str, torch.Tensor]], weights: List[float]) -> Dict[str, torch.Tensor]:
-        if not states:
-            return {}
-        total = float(sum(weights)) or 1.0
-        agg = {k: torch.zeros_like(v) for k, v in states[0].items()}
-        for sd, w in zip(states, weights):
-            scale = float(w) / total
-            for k, v in sd.items():
-                agg[k] += v * scale
-        return agg
+    # @staticmethod
+    # def fedavg_weighted(states: List[Dict[str, torch.Tensor]], weights: List[float]) -> Dict[str, torch.Tensor]:
+    #     if not states:
+    #         return {}
+    #     total = float(sum(weights)) or 1.0
+    #     agg = {k: torch.zeros_like(v) for k, v in states[0].items()}
+    #     for sd, w in zip(states, weights):
+    #         scale = float(w) / total
+    #         for k, v in sd.items():
+    #             agg[k] += v * scale
+    #     return agg
 
     def aggregate_round(self, r: int, base_cid: str):
         """Aggregate updates for round ``r`` and settle incentives."""
@@ -198,7 +208,7 @@ class Aggregator:
         tmp_norms: List[float] = []
         tmp_aligns: List[float] = []
         tmp_accs: List[float] = []
-        tmp_losses: List[float] = []
+        # tmp_losses: List[float] = []
 
         # 1) reconstruct local models & collect metrics
         for nid, (mcid, mtcid, updtype) in subs.items():
@@ -229,35 +239,56 @@ class Aggregator:
             tmp_nodes.append(nid)
             tmp_norms.append(float(torch.linalg.norm(delta_vec)))
             tmp_accs.append(float(mt.get("acc", float("nan"))))
-            tmp_losses.append(float(mt.get("loss", float("nan"))))
+            # tmp_losses.append(float(mt.get("loss", float("nan"))))
             tmp_aligns.append(float("nan"))  # placeholder; filled after aggregation
 
-        # ---------- 2) committee ----------
+        # ---------- 2) set committee ----------
         try:
             committee_ids = self.contract.set_committee(r, self.nodes)
         except TypeError:
             fallback = self._calc_committee()
             maybe = self.contract.set_committee(r, fallback)
             committee_ids = maybe if isinstance(maybe, list) else fallback
-        committee_ids = set(committee_ids or [])
+        print(f"[Round {r}] Committee IDs: {committee_ids}")
+
+        # Ensure committee_ids is a set for fast membership checks
+        if not isinstance(committee_ids, set):
+            committee_ids = set(committee_ids)
+        # committee_ids = set(committee_ids or [])
+        print(f"[Round {r}] Committee selected: {sorted(committee_ids)}")
 
         # ---------- 3) evaluate reconstructed models ----------
-        if realized_states:
-            eval_accs = evaluate_many_state_dicts(
-                realized_states,
-                dataset=self.dataset_name,
-                model_hint=self.model_name,
-                max_workers=4,
-                loaders=self.eval_loaders,
+        # if realized_states:
+        #     eval_accs = evaluate_many_state_dicts(
+        #         realized_states,
+        #         dataset=self.dataset_name,
+        #         model_hint=self.model_name,
+        #         max_workers=4,
+        #         loaders=self.eval_loaders,
+        #     )
+        # else:
+        #     agg_sd = base_sd
+        #     new_cid = self.ipfs.save(agg_sd)
+        #     self.contract.set_global_model(r + 1, new_cid)
+        #     self.contract.settle_round(r)
+        #     return new_cid, {}, {}, {}
+
+        # ---------- 3) USING FLAME to detect poisoned model nodes, and defense the aggregation ----------
+        if hasattr(self.strategy, "aggregate"):
+            # Use the FLAME strategy to aggregate and detect malicious nodes
+            agg_sd = self.strategy.aggregate(
+                states=realized_states,       
+                weights=weights,
+                base_sd=base_sd,
+                meta={"node_ids": tmp_nodes, "committee_ids": list(committee_ids)},
             )
         else:
-            agg_sd = base_sd
-            new_cid = self.ipfs.save(agg_sd)
-            self.contract.set_global_model(r + 1, new_cid)
-            self.contract.settle_round(r)
-            return new_cid, {}, {}, {}
+            # Fallback to FedAvg if no custom strategy is defined
+            agg_sd = self.fedavg_weighted(realized_states, weights)
 
-        # ---------- 4) aggregate -> new global ----------
+        # ---------- 4) save aggregated model ----------
+        new_cid = self.ipfs.save(agg_sd)
+        torch.save(agg_sd, os.path.join(self.save_dir, "models", f"global_round_{r}.pt"))
         meta = {"node_ids": tmp_nodes, "committee_ids": list(committee_ids)}
         if hasattr(self, "strategy") and hasattr(self.strategy, "aggregate"):
             agg_sd = self.strategy.aggregate(realized_states, weights, base_sd=base_sd, meta=meta)
@@ -295,7 +326,7 @@ class Aggregator:
 
         for i, nid in enumerate(tmp_nodes):
             score = float(scores[i]) if i < len(scores) else float("nan")
-            self.contract.set_contribution(r, nid, score)
+            self.contract.set_contribution(r, nid, score)       # contribution for round r
             contrib_map[nid] = score
 
             node = node_by_id.get(nid)
@@ -305,12 +336,26 @@ class Aggregator:
                 node.contrib_history.append(score)
 
             claimed = float(metrics_map.get(nid, {}).get("acc", float("nan")))
-            evalacc = float(eval_accs[i]) if i < len(eval_accs) else float("nan")
-            print(f"Node {nid} claimed={claimed:.4f}, eval={evalacc:.4f}, score={score:.4f}")
-            self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
+            # evalacc = float(eval_accs[i]) if i < len(eval_accs) else float("nan")
+            # print(f"Node {nid} claimed={claimed:.4f}, eval={evalacc:.4f}, score={score:.4f}")
+            # self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
 
-            in_committee = (nid in committee_ids)
-            rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
+            # in_committee = (nid in committee_ids)
+            in_committee = in_committee and (nid in self.contract.get_committee(r))
+            # rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
+            rew = self.contract.calculate_reward(node, avg_rep) if node is not None else 0.0
+            if in_committee:
+                rew += self.contract.get_committee_bonus(r, nid)
+            if rew < 0.0 and self.penalize_negative:
+                rew = 0.0
+            self.contract.set_reward(r, nid, rew)
+            self.contract.add_reward(r, nid, rew * self.reward_rate)
+
+            # Update the node's reputation based on contribution
+            if node is not None:
+                new_rep = self.contract.update_reputation(node, score)
+                node.reputation = new_rep
+                print(f"Node {nid} new reputation: {new_rep:.4f}")
             self.contract.add_reward(r, nid, rew)
             reward_map[nid] = rew
 

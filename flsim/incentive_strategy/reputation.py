@@ -47,6 +47,7 @@ class ReputationIncentives:
             if in_c: n.cooldown=max(n.cooldown,1)
         self.committee_history.append([getattr(n,'id', getattr(n,'cfg',type('C',(),{})()).__dict__.get('node_id',-1)) for n in selected])
         return selected
+    
     def calculate_reward(self, node, avg_rep: float) -> float:
         if not getattr(node,'contrib_history',None) or (node.contrib_history[-1]==0): return 0.0
         import numpy as _np

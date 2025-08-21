@@ -187,10 +187,13 @@ class FLRunner:
                     )
 
                 # 4.3) 聚合（Aggregator 会把 features/committee/contrib 写给合约，并触发清算）
-                new_cid, metrics_map, contrib_map, reward_map = aggr.aggregate_round(
+                # new_cid, metrics_map, contrib_map, reward_map = aggr.aggregate_round(
+                    # r, base_cid=global_cid
+                # )
+                # 4.3) set committee
+                new_cid, metrics_map, contrib_map, reward_map = self.contract.set_committee.aggregate_round(
                     r, base_cid=global_cid
                 )
-
                 # 4.4) 保存 manifest（合约 + 本地）
                 manifest_cid = self.ipfs.save(manifest)
                 self.contract.set_round_manifest(r, manifest_cid)
@@ -257,24 +260,6 @@ class FLRunner:
 
                 print(f"Round {r}: global acc={acc:.3f} | manifest={manifest_cid}")
 
-                # 4.7) 每轮保存 acc_diff 直方图（用于阈值调参）
-                try:
-                    import numpy as _np, csv as _csv, os as _os
-
-                    diffs = []
-                    feats_r = self.contract.features.get(r, {})
-                    for nid in feats_r:
-                        eval_acc = feats_r.get(nid, {}).get("eval_acc", float("nan"))
-                        claimed_acc = feats_r.get(nid, {}).get(
-                            "claimed_acc", float("nan")
-                        )
-                        diffs.append(claimed_acc - eval_acc)
-                    hist, bins = _np.histogram(_np.array(diffs), bins=20, range=(-1, 1))
-                    with open(self.cfg.paths.sim_dir / f"round_{r}_accdiff.csv", "w") as hf:
-                        w = _csv.writer(hf)
-                        for h, b in zip(hist, bins[:-1]):
-                            w.writerow([float(b), int(h)])
-                except Exception:
-                    pass
+    
 
         return True
