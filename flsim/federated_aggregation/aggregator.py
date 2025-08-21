@@ -284,9 +284,7 @@ class Aggregator:
         print(f"[Round {r}] Committee IDs: {committee_ids}")
 
         # Ensure committee_ids is a set for fast membership checks
-        if not isinstance(committee_ids, set):
-            committee_ids = set(committee_ids)
-        # committee_ids = set(committee_ids or [])
+        committee_ids = set(committee_ids or [])
         print(f"[Round {r}] Committee selected: {sorted(committee_ids)}")
 
         # ---------- 3) evaluate reconstructed models ----------
@@ -331,6 +329,28 @@ class Aggregator:
                 metrics_map[nid]["cluster_label"] = int(label)
                 metrics_map[nid]["is_malicious"] = int(label != 0)
 
+            # identify benign and malicious nodes based on cluster label 0
+            benign = [nid for nid, lab in zip(tmp_nodes, labels) if lab == 0]
+            malicious = [nid for nid, lab in zip(tmp_nodes, labels) if lab != 0]
+
+            # true malicious ids from node behaviours
+            true_malicious = {
+                n.cfg.node_id
+                for n in self.nodes
+                if getattr(getattr(n, "behavior", None), "is_malicious", False)
+            }
+            hits = len(set(malicious) & true_malicious)
+            det_rate = (
+                hits / len(true_malicious) if true_malicious else 0.0
+            )
+            print(
+                f"[Round {r}] Benign nodes: {sorted(benign)} | Malicious nodes: {sorted(malicious)}"
+            )
+            if true_malicious:
+                print(
+                    f"[Round {r}] Detection rate: {det_rate:.2%} ({hits}/{len(true_malicious)})"
+                )
+
         # ---------- 5) alignment ----------
         agg_delta = {k: agg_sd[k] - base_sd[k] for k in base_sd.keys()}
         agg_vec = self._flatten_sd(agg_delta)
@@ -372,14 +392,13 @@ class Aggregator:
             # print(f"Node {nid} claimed={claimed:.4f}, eval={evalacc:.4f}, score={score:.4f}")
             # self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
 
-            in_committee = nid in committee_ids
-            # rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
-            rew = self.contract.calculate_reward(node, avg_rep) if node is not None else 0.0
-            if in_committee:
-                rew += self.contract.get_committee_bonus(r, nid)
+            rew = (
+                self.contract.calculate_reward(node, avg_rep)
+                if node is not None
+                else 0.0
+            )
             if rew < 0.0 and self.penalize_negative:
                 rew = 0.0
-            self.contract.set_reward(r, nid, rew)
             self.contract.add_reward(r, nid, rew * self.reward_rate)
 
             # Update the node's reputation based on contribution
@@ -388,7 +407,7 @@ class Aggregator:
                 node.reputation = new_rep
                 print(f"Node {nid} new reputation: {new_rep:.4f}")
 
-            reward_map[nid] = rew
+            reward_map[nid] = rew * self.reward_rate
 
         # ---------- 8) settle ----------
         self.contract.settle_round(r)
