@@ -233,12 +233,12 @@ class Aggregator:
 
         # ---------- 2) committee ----------
         try:
-            committee_ids = self.contract.set_committee(r, self.nodes)
+            # ensure contract maintains the authoritative membership list
+            self.contract.set_committee(r, self.nodes)
         except TypeError:
             fallback = self._calc_committee()
-            maybe = self.contract.set_committee(r, fallback)
-            committee_ids = maybe if isinstance(maybe, list) else fallback
-        committee_ids = set(committee_ids or [])
+            self.contract.set_committee(r, fallback)
+        committee_ids = set(self.contract.committees.get(r, []))
 
         # ---------- 3) evaluate reconstructed models ----------
         if realized_states:
@@ -258,10 +258,21 @@ class Aggregator:
 
         # ---------- 4) aggregate -> new global ----------
         meta = {"node_ids": tmp_nodes, "committee_ids": list(committee_ids)}
+        cluster_labels = {}
         if hasattr(self, "strategy") and hasattr(self.strategy, "aggregate"):
-            agg_sd = self.strategy.aggregate(realized_states, weights, base_sd=base_sd, meta=meta)
+            agg_out = self.strategy.aggregate(realized_states, weights, base_sd=base_sd, meta=meta)
+            if isinstance(agg_out, tuple):
+                agg_sd, cluster_labels = agg_out
+            else:
+                agg_sd = agg_out
         else:
             agg_sd = self.fedavg_weighted(realized_states, weights)
+
+        if cluster_labels:
+            benign = [nid for nid, lab in cluster_labels.items() if lab == 0]
+            malicious = [nid for nid, lab in cluster_labels.items() if lab != 0]
+            rate = len(malicious) / max(1, len(cluster_labels))
+            print(f"[Round {r}] benign={benign} malicious={malicious} detection_rate={rate:.2%}")
 
         new_cid = self.ipfs.save(agg_sd)
         torch.save(agg_sd, os.path.join(self.save_dir, "models", f"global_round_{r}.pt"))
@@ -304,7 +315,9 @@ class Aggregator:
             claimed = float(metrics_map.get(nid, {}).get("acc", float("nan")))
             evalacc = float(eval_accs[i]) if i < len(eval_accs) else float("nan")
             print(f"Node {nid} claimed={claimed:.4f}, eval={evalacc:.4f}, score={score:.4f}")
-            self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc)
+            # store metrics along with cluster label (default 0 if absent)
+            clabel = int(cluster_labels.get(nid, 0))
+            self.contract.set_features(r, nid, claimed_acc=claimed, eval_acc=evalacc, cluster=clabel)
 
             in_committee = (nid in committee_ids)
             rew = self._calculate_reward(node, avg_rep, in_committee) if node is not None else 0.0
@@ -312,7 +325,7 @@ class Aggregator:
             reward_map[nid] = rew
 
         # ---------- 8) settle ----------
-        self.contract.settle_round(r)
+        reward_map = self.contract.settle_round(r)
 
         print(f"[Round {r}] committee={sorted(committee_ids)} | avg_rep={avg_rep:.4f}")
         print(f"[Round {r}] contribs={contrib_map}")

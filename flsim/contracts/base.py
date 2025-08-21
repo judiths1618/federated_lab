@@ -460,6 +460,11 @@ class BaseContract:
         # (Optional) small committee reputation boost per round:
         # self.apply_committee_reputation_bonus(r)
 
+        benign = [n for n, flag in self.mal_detected[r].items() if flag == 0]
+        malicious = [n for n, flag in self.mal_detected[r].items() if flag == 1]
+        rate = len(malicious) / max(1, len(self.mal_detected[r]))
+        print(f"[Round {r}] benign={benign} malicious={malicious} detection_rate={rate:.2%}")
+
         return dict(rewards_r)
 
 
