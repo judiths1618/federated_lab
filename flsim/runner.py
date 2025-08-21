@@ -187,11 +187,7 @@ class FLRunner:
                     )
 
                 # 4.3) 聚合（Aggregator 会把 features/committee/contrib 写给合约，并触发清算）
-                # new_cid, metrics_map, contrib_map, reward_map = aggr.aggregate_round(
-                    # r, base_cid=global_cid
-                # )
-                # 4.3) set committee
-                new_cid, metrics_map, contrib_map, reward_map = self.contract.set_committee.aggregate_round(
+                new_cid, metrics_map, contrib_map, reward_map = aggr.aggregate_round(
                     r, base_cid=global_cid
                 )
                 # 4.4) 保存 manifest（合约 + 本地）
